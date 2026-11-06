@@ -3,11 +3,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import QDate, Qt
+from PyQt6.QtCore import QDate
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDateEdit,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -15,6 +14,7 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QScrollArea,
     QSpinBox,
     QTextEdit,
@@ -26,6 +26,8 @@ from config.constants import LiabilityType
 from models.liability import Liability
 from utils.calculators import emi as calc_emi
 from ui.widgets.common import style_button_box
+from ui.widgets.date_field import DateField
+from utils.formatters import fmt_inr
 
 
 LIABILITY_TYPES: list[tuple[str, str]] = [
@@ -52,7 +54,7 @@ def _money_spin(max_val: float = 10_00_00_000) -> QDoubleSpinBox:
     s.setDecimals(2)
     s.setSingleStep(1000)
     s.setGroupSeparatorShown(True)
-    s.setPrefix("Rs ")
+    s.setPrefix("₹ ")
     return s
 
 
@@ -152,10 +154,7 @@ class LiabilityDialog(QDialog):
         self.remaining_spin.setSuffix(" months")
         lg.addRow("Remaining Months", self.remaining_spin)
 
-        self.start_date = QDateEdit()
-        self.start_date.setCalendarPopup(True)
-        self.start_date.setDate(QDate.currentDate())
-        self.start_date.setDisplayFormat("dd MMM yyyy")
+        self.start_date = DateField(QDate.currentDate())
         lg.addRow("Start Date", self.start_date)
 
         vbox.addWidget(self.loan_group)
@@ -164,10 +163,7 @@ class LiabilityDialog(QDialog):
         due_group = QGroupBox("Payment")
         dg = QFormLayout(due_group)
 
-        self.due_date = QDateEdit()
-        self.due_date.setCalendarPopup(True)
-        self.due_date.setDate(QDate.currentDate().addMonths(1))
-        self.due_date.setDisplayFormat("dd MMM yyyy")
+        self.due_date = DateField(QDate.currentDate().addMonths(1))
         dg.addRow("Next Due Date", self.due_date)
 
         vbox.addWidget(due_group)
@@ -209,18 +205,21 @@ class LiabilityDialog(QDialog):
         months = self.remaining_spin.value()
         if outstanding > 0 and rate > 0 and months > 0:
             e = calc_emi(outstanding, rate, months)
-            self._emi_preview.setText(f"Calculated EMI: Rs {e:,.0f} / month")
+            self._emi_preview.setText(f"Calculated EMI: {fmt_inr(e, decimals=0)} / month")
         else:
             self._emi_preview.setText("Calculated EMI: --")
 
     def _on_accept(self) -> None:
         if not self.name_edit.text().strip():
-            self.name_edit.setFocus()
-            return
-        if self.outstanding_spin.value() == 0:
-            self.outstanding_spin.setFocus()
-            return
+            return self._warn("Give it a name, e.g. Home loan.", self.name_edit)
+        if not self._editing and self.outstanding_spin.value() <= 0:
+            # A loan already repaid is closed from the page, not added.
+            return self._warn("Enter how much is still owed.", self.outstanding_spin)
         self.accept()
+
+    def _warn(self, text: str, widget: QWidget) -> None:
+        QMessageBox.warning(self, "Please check", text)
+        widget.setFocus()
 
     # ------------------------------------------------------------------
     def _populate(self, lb: Liability) -> None:
@@ -238,10 +237,8 @@ class LiabilityDialog(QDialog):
         self.emi_spin.setValue(lb.emi_amount or 0)
         self.tenure_spin.setValue(lb.tenure_months or 1)
         self.remaining_spin.setValue(lb.remaining_months or 0)
-        if lb.start_date:
-            self.start_date.setDate(QDate.fromString(lb.start_date, "yyyy-MM-dd"))
-        if lb.next_due_date:
-            self.due_date.setDate(QDate.fromString(lb.next_due_date, "yyyy-MM-dd"))
+        self.start_date.set_iso(lb.start_date)
+        self.due_date.set_iso(lb.next_due_date)
         if lb.notes:
             self.notes_edit.setPlainText(lb.notes)
         self._on_type_changed()
@@ -266,13 +263,13 @@ class LiabilityDialog(QDialog):
             lender=self.lender_edit.text().strip() or None,
             outstanding=self.outstanding_spin.value(),
             interest_rate=self.rate_spin.value() or None,
-            principal=self.principal_spin.value() if is_loan else 0.0,
+            # Card dues and BNPL hide the principal field; keep what is stored.
+            principal=self.principal_spin.value(),
             emi_amount=_opt(self.emi_spin)        if is_loan else None,
             tenure_months=_opt_i(self.tenure_spin)   if is_loan else None,
             remaining_months=_opt_i(self.remaining_spin) if is_loan else None,
-            start_date=(self.start_date.date().toString("yyyy-MM-dd")
-                        if is_loan else None),
-            next_due_date=self.due_date.date().toString("yyyy-MM-dd"),
+            start_date=self.start_date.iso() if is_loan else None,
+            next_due_date=self.due_date.iso(),
             account_id=self.account_combo.currentData(),
             notes=self.notes_edit.toPlainText().strip() or None,
             is_active=int(self.active_check.isChecked()),

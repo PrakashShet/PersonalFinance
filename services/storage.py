@@ -116,6 +116,12 @@ class Storage:
             write_meta(self.store_dir, STORE_VERSION, self.app_version)
         self.is_open = True
 
+        # A new store (or one whose first save never happened) has rows only in
+        # memory, e.g. the seed categories. Write them now, so the files and the
+        # startup backup are complete even if the app is closed a second later.
+        if any(rows is None for rows in tables.values()) or not tables.get("categories.json"):
+            self.save()
+
         # The store just validated and loaded: that's a known-good backup.
         report.startup_backup = self.backup("startup")
         return report

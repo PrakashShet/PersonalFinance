@@ -54,6 +54,9 @@ class BaseRepository(Generic[T]):
         id_ = data.pop("id")
         if id_ is None:
             raise ValueError("Cannot update entity without id")
+        # Set once by the database when the row is inserted; an edit never changes
+        # it (dialogs build fresh objects without it, which used to blank it).
+        data.pop("created_at", None)
         set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
         sql = f"UPDATE {self.table_name} SET {set_clause} WHERE id = ?"
         self.db.execute(sql, (*data.values(), id_))

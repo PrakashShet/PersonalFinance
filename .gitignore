@@ -19,6 +19,9 @@ venv/
 logs/*.log
 data/app.db
 data/app.db-*
+# The single-instance lock: held while the app runs; holds the PID and computer name.
+data/app.lock
+*.lock
 data/cache/*
 !data/cache/.gitkeep
 

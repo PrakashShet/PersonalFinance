@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import shutil
 import sys
+import time
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -66,6 +68,39 @@ def remove_legacy_sqlite() -> None:
             pass
 
 
+def install_error_handler() -> None:
+    """Report unexpected errors instead of crashing.
+
+    PyQt6 turns an exception escaping a button handler into a fatal error that
+    closes the app at once. Log it with its traceback, tell the user, and keep
+    running. Saves are atomic and happen within a second of each change, so what
+    was saved stays safe. A burst of errors (e.g. while repainting) gets one message.
+    """
+    state = {"showing": False, "last": 0.0}
+
+    def hook(exc_type, exc, tb) -> None:
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc, tb)
+            return
+        log.error("Unexpected error:\n" + "".join(traceback.format_exception(exc_type, exc, tb)))
+        now = time.monotonic()
+        if state["showing"] or now - state["last"] < 5.0:
+            return
+        state["showing"], state["last"] = True, now
+        try:
+            QMessageBox.critical(
+                None, settings.APP_NAME,
+                f"Something went wrong, so that last action didn't finish:\n\n{exc}\n\n"
+                "Everything saved before it is safe. If something looks wrong, close and "
+                f"reopen the app.\n\nDetails are in the log: {settings.LOG_FILE}")
+        except Exception:  # noqa: BLE001 - never fail inside the error handler
+            pass
+        finally:
+            state["showing"] = False
+
+    sys.excepthook = hook
+
+
 def show_store_error(err: StoreLoadError, latest_backup: Optional[Path]) -> None:
     box = QMessageBox(QMessageBox.Icon.Critical, settings.APP_NAME,
                       f"Your data file “{err.path.name}” {err.reason}")
@@ -92,6 +127,7 @@ def show_store_error(err: StoreLoadError, latest_backup: Optional[Path]) -> None
 
 def main() -> int:
     app = QApplication(sys.argv)
+    install_error_handler()
     app.setApplicationName(settings.APP_NAME)
     app.setApplicationVersion(settings.APP_VERSION)
     app.setOrganizationName("PersonalFinanceManager")
@@ -152,7 +188,12 @@ def main() -> int:
     window.show()
     saver.save_now()
 
-    if report.migrated_from is not None:
+    # Data from an old build beside the .exe is always in the old format too,
+    # so both can happen at once - say both.
+    if imported is not None and report.migrated_from is not None:
+        notify("Your data was moved to its new home in AppData and upgraded to the new "
+               "format - a backup was kept")
+    elif report.migrated_from is not None:
         notify("Your data was upgraded to the new format - a backup was kept")
     elif imported is not None:
         notify("Your data was moved to its new home in AppData")

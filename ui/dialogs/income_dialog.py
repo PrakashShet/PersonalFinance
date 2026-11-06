@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -12,9 +11,9 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QScrollArea,
     QTextEdit,
     QVBoxLayout,
@@ -23,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from models.income import IncomeSource
 from ui.widgets.common import style_button_box
+from utils.formatters import fmt_inr
 
 
 SOURCE_TYPES = [
@@ -208,13 +208,12 @@ class IncomeDialog(QDialog):
         gross = self.basic_spin.value() + self.hra_spin.value() + self.special_spin.value()
         deductions = self.pf_emp_spin.value() + self.pt_spin.value() + self.tds_spin.value()
         net = gross - deductions
-        self._net_label.setText(f"Net Take-Home: ₹{net:,.0f}")
+        self._net_label.setText(f"Net Take-Home: {fmt_inr(net, decimals=0)}")
 
     def _on_accept(self) -> None:
-        name = self.name_edit.text().strip()
-        if not name:
+        if not self.name_edit.text().strip():
+            QMessageBox.warning(self, "Please check", "Give the income source a name, e.g. Salary.")
             self.name_edit.setFocus()
-            self.name_edit.setPlaceholderText("⚠ Name is required")
             return
         self.accept()
 

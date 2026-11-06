@@ -27,8 +27,36 @@ automatically, after a backup, the first time a new version opens it.
 - New data file `budgets.json`, created empty on first start. The data format stays
   v2, so no upgrade step is needed.
 
-### Fixed
+### Fixed (found by end-to-end testing)
 
+- **Adding or editing a SIP or mutual fund crashed the app.** The form sent the
+  units twice.
+- **An unexpected error closed the app without a word.** It now explains what
+  went wrong, writes the details to the log, and keeps running. Your saved data
+  is unaffected.
+- **A long transaction history could freeze the app for minutes.** This happened
+  when switching theme, or when editing while the Transactions page showed a
+  long period. With 30 years of history (35,000 transactions) the app now opens in
+  about half a second and shows *All time* in under a second.
+- **The categories could disappear for good** if the app was closed within a
+  second of its very first start. A new store is now written straight away, and
+  an empty category list puts the built-in categories back.
+- **Saving an edit could quietly change the record.** It erased the record's
+  creation date, set a purchase, maturity or target date the record never had,
+  or reset a card due's principal to ₹0. Dates you leave empty now show *Not set*
+  and stay empty.
+- **Some forms ignored Save without saying why** (investment, loan and income
+  source). They now say what's missing. Term insurance can be added without an
+  invested amount; it needs the cover amount instead.
+- **Rebuilding the `.exe` deleted data kept beside an older build** before the
+  new version could move it to AppData. The build now sets that data aside and
+  puts it back.
+- Moving data from an old build now says it was moved *and* upgraded.
+- The loan and goal forms show ₹ instead of "Rs", and the take-home and EMI
+  previews use Indian grouping (₹1,17,400).
+- The `.bat` scripts named a setup script that doesn't exist (`setup.bat`).
+- The single-instance lock file, which includes your computer's name, is no
+  longer picked up by git.
 - Red and green figures (gains, losses, money still needed, values over a limit)
   showed as plain text on cards, stat grids, rows and tiles across the app. They now
   show their colour, and a test keeps it that way.

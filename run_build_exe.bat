@@ -9,7 +9,7 @@ REM ============================================================
 cd /d "%~dp0"
 
 if not exist ".venv\Scripts\activate.bat" (
-    echo [ERROR] Virtual environment not found. Please run "setup.bat" first.
+    echo [ERROR] Virtual environment not found. Please run "run_setup.bat" first.
     exit /b 1
 )
 
@@ -27,9 +27,39 @@ if errorlevel 1 (
     exit /b 1
 )
 
+set "OUTDIR=%~dp0dist\PersonalFinanceManager"
+set "KEEP=%~dp0dist\_data_kept_during_build"
+
+REM --- Builds before 1.0 kept their data beside the .exe, in a "data" folder.
+REM --- A rebuild replaces the whole output folder and would delete it, so set
+REM --- it aside now and put it back afterwards: the new .exe then moves it to
+REM --- AppData on its first run.
+if exist "%OUTDIR%\data" (
+    if exist "%KEEP%" (
+        echo [ERROR] "%KEEP%" is left from an earlier build. Check it, move it somewhere safe, then build again.
+        exit /b 1
+    )
+    echo [INFO] Setting aside the data folder beside the old .exe during the build ...
+    move "%OUTDIR%\data" "%KEEP%" >nul
+    if errorlevel 1 (
+        echo [ERROR] Could not move "%OUTDIR%\data" - close the app and try again.
+        exit /b 1
+    )
+)
+
 echo [INFO] Building executable with PyInstaller ...
 python -m PyInstaller --noconfirm --clean personal_finance.spec
 set EXITCODE=%ERRORLEVEL%
+
+if exist "%KEEP%" (
+    if not exist "%OUTDIR%" mkdir "%OUTDIR%"
+    move "%KEEP%" "%OUTDIR%\data" >nul
+    if errorlevel 1 (
+        echo [WARNING] Your old data is safe in "%KEEP%" - move it into "%OUTDIR%\data" by hand.
+    ) else (
+        echo [INFO] Put the old data back beside the new .exe - it moves to AppData on first run.
+    )
+)
 
 if %EXITCODE% neq 0 (
     echo.
@@ -37,7 +67,6 @@ if %EXITCODE% neq 0 (
     endlocal & exit /b %EXITCODE%
 )
 
-set "OUTDIR=%~dp0dist\PersonalFinanceManager"
 set "EXE=%OUTDIR%\PersonalFinanceManager.exe"
 
 if not exist "%EXE%" (

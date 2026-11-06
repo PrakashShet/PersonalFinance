@@ -135,9 +135,7 @@ class TransactionsView(QWidget):
         amount_head = QTableWidgetItem("Amount")
         amount_head.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.table.setHorizontalHeaderItem(len(_COLUMNS) - 1, amount_head)
-        for c in range(len(_COLUMNS)):
-            header.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self._fit_columns()
         self.table.doubleClicked.connect(lambda _i: self._on_edit())
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
@@ -390,6 +388,32 @@ class TransactionsView(QWidget):
         positive = theme.qcolor("positive")
         muted = theme.qcolor("text_muted")
 
+        # Fill without repainting or re-fitting columns after every cell: with
+        # "resize to contents" on, that work grows with rows x rows (minutes for
+        # a few years of history after a theme change). Fit once at the end.
+        header = self.table.horizontalHeader()
+        self.table.setUpdatesEnabled(False)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        try:
+            self._fill(f, right, positive, muted)
+        finally:
+            self._fit_columns()
+            self.table.setUpdatesEnabled(True)
+
+        self.body.setCurrentIndex(0 if self._rows else 1)
+        n = len(self._rows)
+        self.count_label.setText(f"{n} transaction{'s' if n != 1 else ''}")
+        self._update_kpis(f)
+        self._update_buttons()
+        self._dirty = False
+
+    def _fit_columns(self) -> None:
+        header = self.table.horizontalHeader()
+        for c in range(len(_COLUMNS)):
+            header.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+
+    def _fill(self, f: dict, right, positive, muted) -> None:
         self.table.setRowCount(len(self._rows))
         for r, row in enumerate(self._rows):
             ttype = row["txn_type"]
@@ -413,13 +437,6 @@ class TransactionsView(QWidget):
             if signed > 0:
                 item.setForeground(positive)
             self.table.setItem(r, 5, item)
-
-        self.body.setCurrentIndex(0 if self._rows else 1)
-        n = len(self._rows)
-        self.count_label.setText(f"{n} transaction{'s' if n != 1 else ''}")
-        self._update_kpis(f)
-        self._update_buttons()
-        self._dirty = False
 
     def _update_kpis(self, f: dict) -> None:
         s = self.service.summary(date_from=f["date_from"], date_to=f["date_to"])

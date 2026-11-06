@@ -49,6 +49,9 @@ STORE_LOAD_ORDER = [
 
 StoreTables = dict[str, Optional[list[dict[str, Any]]]]
 
+# Tables filled from data/seed when empty; an empty store file never wipes them.
+SEEDED_TABLES = frozenset({"categories"})
+
 
 class StoreLoadError(Exception):
     """A store file could not be read safely. Nothing has been written."""
@@ -136,7 +139,11 @@ class DataLoader:
 
         A missing file is created as ``[]`` and its table left as-is, so seed
         rows (categories) survive a first run. An existing file - even ``[]`` -
-        replaces the table's contents.
+        replaces the table's contents, except for the seeded tables: the app
+        never empties those (categories can't be deleted), so an empty file only
+        means the first save never happened - e.g. the app was closed within a
+        second of its first start. Wiping the seeds then would leave no
+        categories at all, for good.
         """
         store_dir = Path(store_dir)
         store_dir.mkdir(parents=True, exist_ok=True)
@@ -147,6 +154,8 @@ class DataLoader:
             rows = tables.get(filename)
             if rows is None:
                 write_text_atomic(path, "[]\n")
+                continue
+            if not rows and table in SEEDED_TABLES:
                 continue
             self._check_columns(path, table, rows)
             self.db.execute(f"DELETE FROM {table};")

@@ -7,7 +7,6 @@ from PyQt6.QtCore import QDate
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDateEdit,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -19,7 +18,6 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QScrollArea,
     QSlider,
-    QSpinBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -30,6 +28,7 @@ from models.goal import Goal
 from utils.form_validation import validation_error
 from utils.formatters import fmt_inr
 from ui.widgets.common import style_button_box
+from ui.widgets.date_field import DateField
 
 
 STATUSES = [
@@ -49,7 +48,7 @@ def _money_spin(max_val: float = 50_00_00_000) -> QDoubleSpinBox:
     s.setDecimals(2)
     s.setSingleStep(10_000)
     s.setGroupSeparatorShown(True)
-    s.setPrefix("Rs ")
+    s.setPrefix("₹ ")
     return s
 
 
@@ -104,10 +103,7 @@ class GoalDialog(QDialog):
         self.current_spin = _money_spin()
         cf.addRow("Current Amount", self.current_spin)
 
-        self.target_date = QDateEdit()
-        self.target_date.setCalendarPopup(True)
-        self.target_date.setDate(QDate.currentDate().addYears(3))
-        self.target_date.setDisplayFormat("dd MMM yyyy")
+        self.target_date = DateField(QDate.currentDate().addYears(3))
         cf.addRow("Target Date", self.target_date)
 
         # Priority slider + label
@@ -207,8 +203,7 @@ class GoalDialog(QDialog):
         self.name_edit.setText(g.name or "")
         self.target_spin.setValue(g.target_amount or 0)
         self.current_spin.setValue(g.current_amount or 0)
-        if g.target_date:
-            self.target_date.setDate(QDate.fromString(g.target_date, "yyyy-MM-dd"))
+        self.target_date.set_iso(g.target_date)
         self.priority_slider.setValue(g.priority or 3)
         idx = self.status_combo.findData(g.status or "active")
         if idx >= 0:
@@ -227,7 +222,7 @@ class GoalDialog(QDialog):
             name=self.name_edit.text().strip(),
             target_amount=self.target_spin.value(),
             current_amount=self.current_spin.value(),
-            target_date=self.target_date.date().toString("yyyy-MM-dd"),
+            target_date=self.target_date.iso(),
             priority=self.priority_slider.value(),
             status=self.status_combo.currentData(),
             expected_return=self.return_spin.value() / 100.0,

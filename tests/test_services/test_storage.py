@@ -202,3 +202,29 @@ def test_budget_for_a_missing_category_stops_the_load(tmp_path: Path):
     with pytest.raises(StoreLoadError, match="budgets.json"):
         s.open()
     db.close()
+
+
+def test_a_new_store_is_written_complete_before_the_startup_backup(tmp_path: Path):
+    s, db = _storage(tmp_path)
+    s.open()
+    on_disk = json.loads((tmp_path / "store" / "categories.json").read_text(encoding="utf-8"))
+    assert len(on_disk) > 0                      # the seed categories, not "[]"
+    [backup] = list_backups(tmp_path / "backups")
+    assert json.loads((backup / "categories.json").read_text(encoding="utf-8")) == on_disk
+    db.close()
+
+
+def test_an_empty_categories_file_does_not_wipe_the_categories(tmp_path: Path):
+    """The first save never happened (the app was closed a second after its first
+    start): categories.json is still "[]". That used to wipe the seed categories
+    on every later start - leaving no categories at all, with no way to add any."""
+    store = tmp_path / "store"
+    _write(store, "categories.json", [])
+    _write(store, "accounts.json", [{"id": 1, "name": "Bank", "account_type": "savings",
+                                     "opening_balance": 0.0, "current_balance": 0.0}])
+    s, db = _storage(tmp_path)
+    s.open()
+    assert db.fetch_one("SELECT COUNT(*) AS c FROM categories")["c"] > 0
+    healed = json.loads((store / "categories.json").read_text(encoding="utf-8"))
+    assert len(healed) > 0                       # and written back straight away
+    db.close()

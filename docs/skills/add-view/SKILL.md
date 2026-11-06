@@ -113,6 +113,23 @@ Add/edit modals live in `ui/dialogs/`. They take the values and lookups they dis
 return data - the page saves. Call `style_button_box(box)` so Save is the primary
 button. Small single-purpose prompts belong in `ui/dialogs/quick_dialogs.py`.
 
+- **Never refuse Save silently.** Show `QMessageBox.warning(self, "Please check", ...)`
+  naming what's missing, then focus the field.
+- **Edit + Save without changes must leave the record identical** -
+  `test_e2e_edit_fidelity` checks every dialog. A date the record may not have is a
+  `DateField` (`ui/widgets/date_field.py`: shows *Not set*, `iso()` returns `None`);
+  a field hidden for this record's type keeps its stored value; a combo whose value can
+  be unset needs a *Not set* item.
+- Money inputs use the `₹ ` prefix; previews and labels use `fmt_inr`, never
+  `f"{x:,}"` (Western grouping).
+
+## Big tables
+
+Filling a `QTableWidget` row by row while its columns *resize to contents* re-fits the
+columns after every cell - rows x rows work that froze the app for minutes with a few
+years of history. Turn updates off and set the header to `Fixed` while filling, then
+restore the modes once (see `TransactionsView.refresh` / `_fit_columns`).
+
 ## Verify
 
 ```bash

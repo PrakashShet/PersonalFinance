@@ -164,7 +164,22 @@ without `on_change` leaves pages stale *and* skips the save-after-change.
 
 ## Conventions and gotchas
 
-- **`BaseRepository.insert` drops `None` values; `update` does not.**
+- **`BaseRepository.insert` drops `None` values; `update` does not** - except
+  `created_at`, which `update` never writes (the database sets it once; dialogs build
+  fresh objects without it, which used to blank it on every edit).
+- **Optional dates use `ui/widgets/date_field.DateField`**, which shows *Not set* and
+  returns `None`. A plain `QDateEdit` always holds a date, so Edit + Save invented one.
+  `test_e2e_edit_fidelity` fails if any dialog changes a record it only re-saved.
+- **Seeded tables** (`SEEDED_TABLES` in `data_loader.py`, i.e. categories): an empty
+  store file never wipes the seed rows, and `Storage.open` saves a new store at once -
+  otherwise a close within a second of the first start left no categories, for good.
+- **Errors in handlers:** `main.py` installs an error hook, so an exception escaping a
+  slot is logged and reported instead of aborting the app (PyQt6's default). It's a
+  safety net: still catch expected errors (`ValueError` from a service) in the view and
+  show a `QMessageBox`.
+- **Big tables:** fill a `QTableWidget` with updates off and columns not resizing to
+  contents, then fit once (`TransactionsView.refresh`) - per-cell fitting is rows x rows
+  and froze the app for minutes with a few years of history.
 - **Money formatting:** `utils/formatters.py` - `fmt_inr(x, compact=, decimals=)`,
   `fmt_money(x, currency)`. Negative is `−₹1,234.00` (true minus before the symbol).
   Never hand-roll ₹ strings; Indian grouping (1,23,45,678) isn't `f"{x:,}"`.
@@ -194,7 +209,7 @@ without `on_change` leaves pages stale *and* skips the save-after-change.
 ```bat
 run_setup.bat            :: create .venv, install requirements
 run.bat                  :: launch the app
-run_tests.bat            :: full pytest suite (147 tests, ~10 s)
+run_tests.bat            :: full pytest suite (167 tests, ~30 s; includes the end-to-end suites)
 run_tests.bat -m smoke   :: E2E + UI smoke only
 run_build_exe.bat        :: PyInstaller build via personal_finance.spec
 ```
@@ -211,6 +226,13 @@ python tools/privacy_scan.py --history                    # before any push: no 
 
 Tests need PyQt6 + pytest + pytest-qt (the Windows `.venv`). They cannot run in a Linux
 sandbox; say so rather than implying they passed.
+
+End-to-end tests (`tests/test_smoke/test_e2e_*.py`) drive the real window: a `Robot`
+replaces `QDialog.exec` with a scripted handler that fills a dialog and clicks its real
+Save button (so validation runs); message boxes are recorded; a dialog left open fails.
+`test_e2e_startup` runs the real `main.py` in a child process (`main_runner.py`). A new
+dialog belongs in `test_e2e_edit_fidelity`; a new user flow in `test_e2e_user_session`.
+`tests/conftest.py` destroys every window after each test, so no test leaks into the next.
 
 ---
 

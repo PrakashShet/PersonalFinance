@@ -4,30 +4,11 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtWidgets import QApplication, QListWidget, QStackedWidget
 
-from config.settings import settings
-from db.migrate import run_migrations
 from models.account import Account
 from models.holding import Holding
 from models.liability import Liability
-from services.data_loader import DataLoader
-from tests.conftest import SCHEMA_PATH
 
 pytestmark = pytest.mark.smoke
-
-
-@pytest.fixture
-def isolated_app_db(tmp_path, empty_store):
-    """Connect the app singleton to an isolated DB before views are constructed."""
-    from db.connection import db
-
-    db.connect(tmp_path / "ui_smoke.db")
-    db.apply_schema(SCHEMA_PATH)
-    run_migrations(db)
-    loader = DataLoader(db)
-    loader.load_seed_data(settings.SEED_DIR)
-    loader.load_store_data(empty_store)
-    yield db
-    db.close()
 
 
 def test_main_window_loads_all_nav_pages(qtbot, isolated_app_db):

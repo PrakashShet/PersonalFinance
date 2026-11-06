@@ -48,9 +48,16 @@ need:
 ## Tier 3 - the test suite (Windows `.venv`)
 
 ```bat
-run_tests.bat              :: everything - 147 tests, about 10 s, as of 1.1.0
+run_tests.bat              :: everything - 167 tests, about 30 s, as of 1.1.0
 run_tests.bat -m smoke     :: E2E + UI only
 ```
+
+The end-to-end suites (`tests/test_smoke/test_e2e_*.py`) drive the real window. Extend
+them with the change: a new dialog joins `test_e2e_edit_fidelity` (Edit + Save without
+changes must leave the record identical), a new user flow joins
+`test_e2e_user_session`, start-up behaviour joins `test_e2e_startup` (the real `main.py`
+in a child process). Their `Robot` clicks each dialog's real Save button, records message
+boxes, and fails on a dialog left open - so a form that silently ignores Save is caught.
 
 `tests/conftest.py` points `PFM_HOME` at a temporary folder, so tests never touch
 real data. Use the fixtures: `temp_db` (empty schema), `empty_store`,
@@ -111,6 +118,7 @@ xirr([(0, -100), (365, 110)])   # ≈ 0.10
 - [ ] Persistence wired in the loader, the persister and `check_store.py` (if a table changed)
 - [ ] `check_store.py` shows no new findings on a copy
 - [ ] Tests run, with the count reported - or explicitly not run, with the reason
+- [ ] A new or changed dialog is covered by the end-to-end suites (edit fidelity at least)
 - [ ] Screens looked at in both themes (if the UI changed); user guide updated if users see it
 - [ ] `STATUS.md` updated if this closed or opened a gap; no new planning document
 - [ ] Before any push: `python tools/privacy_scan.py --history` (see the **release** skill)

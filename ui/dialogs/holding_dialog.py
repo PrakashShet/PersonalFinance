@@ -3,19 +3,17 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDateEdit,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QScrollArea,
     QSpinBox,
     QTextEdit,
@@ -26,6 +24,7 @@ from PyQt6.QtCore import QDate
 
 from models.holding import Holding
 from config.constants import HoldingType
+from ui.widgets.date_field import DateField
 from ui.widgets.common import style_button_box
 
 
@@ -142,14 +141,12 @@ class HoldingDialog(QDialog):
             self.account_combo.addItem(name, aid)
         cf.addRow("Linked Account", self.account_combo)
 
-        self.purchase_date = QDateEdit()
-        self.purchase_date.setCalendarPopup(True)
-        self.purchase_date.setDate(QDate.currentDate())
-        self.purchase_date.setDisplayFormat("dd MMM yyyy")
+        self.purchase_date = DateField(QDate.currentDate())
         cf.addRow("Purchase Date", self.purchase_date)
 
         self.invested_spin = _money_spin()
-        cf.addRow("Amount Invested *", self.invested_spin)
+        self.invested_label = QLabel("Amount Invested *")
+        cf.addRow(self.invested_label, self.invested_spin)
 
         self.current_spin = _money_spin()
         cf.addRow("Current Value", self.current_spin)
@@ -229,15 +226,14 @@ class HoldingDialog(QDialog):
         self.rate_spin.setSuffix(" %")
         fg.addRow("Interest / Return Rate", self.rate_spin)
 
-        self.maturity_date = QDateEdit()
-        self.maturity_date.setCalendarPopup(True)
-        self.maturity_date.setDate(QDate.currentDate().addYears(1))
-        self.maturity_date.setDisplayFormat("dd MMM yyyy")
+        self.maturity_date = DateField(QDate.currentDate().addYears(1))
         fg.addRow("Maturity Date", self.maturity_date)
 
         self.payout_combo = QComboBox()
+        self.payout_combo.addItem("Not set", None)
         for key, label in PAYOUT_FREQS:
             self.payout_combo.addItem(label, key)
+        self.payout_combo.setCurrentIndex(self.payout_combo.findData("on_maturity"))
         fg.addRow("Payout Frequency", self.payout_combo)
 
         self.auto_renew_check = QCheckBox("Auto-renew on maturity")
@@ -275,10 +271,7 @@ class HoldingDialog(QDialog):
         self.premium_spin = _money_spin()
         ig.addRow("Annual Premium", self.premium_spin)
 
-        self.premium_due = QDateEdit()
-        self.premium_due.setCalendarPopup(True)
-        self.premium_due.setDate(QDate.currentDate().addYears(1))
-        self.premium_due.setDisplayFormat("dd MMM yyyy")
+        self.premium_due = DateField(QDate.currentDate().addYears(1))
         ig.addRow("Next Premium Due", self.premium_due)
 
         self.term_spin = QSpinBox()
@@ -346,6 +339,9 @@ class HoldingDialog(QDialog):
         self.symbol_hint.setVisible(True)
 
     def _on_type_changed(self) -> None:
+        # Protection has nothing invested; its cover amount is what's required.
+        self.invested_label.setText("Amount Invested" if self.type_combo.currentData() in _INS_TYPES
+                                    else "Amount Invested *")
         t = self.type_combo.currentData()
         self.stock_group.setVisible(t in _STOCK_TYPES)
         self.sip_group.setVisible(t in _MF_TYPES)
@@ -378,13 +374,21 @@ class HoldingDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _on_accept(self) -> None:
+        t = self.type_combo.currentData()
         if not self.name_edit.text().strip():
-            self.name_edit.setFocus()
-            return
-        if self.invested_spin.value() == 0:
-            self.invested_spin.setFocus()
-            return
+            return self._warn("Give the investment a name.", self.name_edit)
+        if t in _INS_TYPES:
+            # Protection: nothing is invested, but the cover must be known.
+            if self.sum_assured_spin.value() <= 0:
+                return self._warn("Enter the sum assured (the cover amount).",
+                                  self.sum_assured_spin)
+        elif self.invested_spin.value() <= 0:
+            return self._warn("Enter how much you have invested in total.", self.invested_spin)
         self.accept()
+
+    def _warn(self, text: str, widget: QWidget) -> None:
+        QMessageBox.warning(self, "Please check", text)
+        widget.setFocus()
 
     # ------------------------------------------------------------------
     # Populate from existing holding
@@ -399,8 +403,7 @@ class HoldingDialog(QDialog):
         self.folio_edit.setText(h.folio_or_account or "")
         aidx = self.account_combo.findData(h.linked_account_id)
         self.account_combo.setCurrentIndex(aidx if aidx >= 0 else 0)
-        if h.purchase_date:
-            self.purchase_date.setDate(QDate.fromString(h.purchase_date, "yyyy-MM-dd"))
+        self.purchase_date.set_iso(h.purchase_date)
         self.invested_spin.setValue(h.invested_amount or 0)
         self.current_spin.setValue(h.current_value or 0)
         self.active_check.setChecked(bool(h.is_active))
@@ -434,9 +437,8 @@ class HoldingDialog(QDialog):
         # FD
         if h.interest_rate:
             self.rate_spin.setValue(h.interest_rate)
-        if h.maturity_date:
-            self.maturity_date.setDate(QDate.fromString(h.maturity_date, "yyyy-MM-dd"))
-        pf_idx = self.payout_combo.findData(h.payout_frequency or "on_maturity")
+        self.maturity_date.set_iso(h.maturity_date)
+        pf_idx = self.payout_combo.findData(h.payout_frequency)
         if pf_idx >= 0:
             self.payout_combo.setCurrentIndex(pf_idx)
         self.auto_renew_check.setChecked(bool(h.auto_renew))
@@ -455,8 +457,7 @@ class HoldingDialog(QDialog):
             self.sum_assured_spin.setValue(h.sum_assured)
         if h.premium_amount:
             self.premium_spin.setValue(h.premium_amount)
-        if h.premium_due_date:
-            self.premium_due.setDate(QDate.fromString(h.premium_due_date, "yyyy-MM-dd"))
+        self.premium_due.set_iso(h.premium_due_date)
         if h.policy_term_years:
             self.term_spin.setValue(h.policy_term_years)
 
@@ -480,13 +481,21 @@ class HoldingDialog(QDialog):
             v = spin.value()
             return v if v > 0 else None
 
+        # Stocks keep shares / price in quantity / current_price; funds keep
+        # units / NAV in the same two columns.
+        quantity = current_price = None
+        if t in _STOCK_TYPES:
+            quantity, current_price = _opt_qty(self.qty_spin), _opt_money(self.cur_price_spin)
+        elif t in _MF_TYPES:
+            quantity, current_price = _opt_qty(self.units_spin), _opt_money(self.nav_spin)
+
         return Holding(
             id=self._holding.id if self._editing else None,
             name=self.name_edit.text().strip(),
             holding_type=t,
             institution=self.institution_edit.text().strip() or None,
             folio_or_account=self.folio_edit.text().strip() or None,
-            purchase_date=self.purchase_date.date().toString("yyyy-MM-dd"),
+            purchase_date=self.purchase_date.iso(),
             invested_amount=self.invested_spin.value(),
             current_value=self.current_spin.value(),
             is_active=int(self.active_check.isChecked()),
@@ -495,9 +504,9 @@ class HoldingDialog(QDialog):
             # Stock / ETF
             symbol=self.symbol_edit.text().strip() or None        if t in _STOCK_TYPES else None,
             exchange=self.exchange_combo.currentText()             if t in _STOCK_TYPES else None,
-            quantity=_opt_qty(self.qty_spin)                      if t in _STOCK_TYPES else None,
+            quantity=quantity,
             avg_price=_opt_money(self.avg_price_spin)             if t in _STOCK_TYPES else None,
-            current_price=_opt_money(self.cur_price_spin)         if t in _STOCK_TYPES else None,
+            current_price=current_price,
             market_cap=self.cap_combo.currentData() or None       if t in _STOCK_TYPES else None,
             sector=self.sector_edit.text().strip() or None        if t in _STOCK_TYPES else None,
             # SIP / MF
@@ -506,8 +515,7 @@ class HoldingDialog(QDialog):
                               if t in _MF_TYPES and self.sip_day_spin.value() > 0 else None),
             # FD / Bond etc
             interest_rate=self.rate_spin.value() or None          if t in _FD_TYPES else None,
-            maturity_date=(self.maturity_date.date().toString("yyyy-MM-dd")
-                           if t in _FD_TYPES else None),
+            maturity_date=self.maturity_date.iso()                if t in _FD_TYPES else None,
             payout_frequency=self.payout_combo.currentData()      if t in _FD_TYPES else None,
             auto_renew=int(self.auto_renew_check.isChecked())     if t in _FD_TYPES else 0,
             # Gold
@@ -517,24 +525,10 @@ class HoldingDialog(QDialog):
             # Insurance
             sum_assured=_opt_money(self.sum_assured_spin)         if t in _INS_TYPES else None,
             premium_amount=_opt_money(self.premium_spin)          if t in _INS_TYPES else None,
-            premium_due_date=(self.premium_due.date().toString("yyyy-MM-dd")
-                              if t in _INS_TYPES else None),
+            premium_due_date=self.premium_due.iso()               if t in _INS_TYPES else None,
             policy_term_years=(self.term_spin.value()
                                if t in _INS_TYPES else None),
-            # SIP units / NAV shared with quantity / current_price
-            **_sip_overrides(t, self.units_spin, self.nav_spin),
         )
-
-
-def _sip_overrides(t: str, units_spin, nav_spin) -> dict:
-    if t in _MF_TYPES:
-        u = units_spin.value()
-        nav = nav_spin.value()
-        return {
-            "quantity":      u if u > 0 else None,
-            "current_price": nav if nav > 0 else None,
-        }
-    return {}
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────

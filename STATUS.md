@@ -16,24 +16,42 @@ place; don't add another planning document. Superseded plans live in `docs/archi
 
 Verified this pass, by running things - not asserted:
 
-- **Test suite executed on Windows: 147 passed** (`run_tests.bat`). Includes hand-worked
-  budget numbers, a save → reload round trip for budgets, a smoke test that drives the
-  Budgets page, the Dashboard alert, the expense-dialog hint and *See transactions*, and
-  a regression test that coloured (toned) labels really show their colour.
-- `compileall` clean; layering rule holds (no `db` / `repositories` imports in `ui/`); no
-  hex colours in Python; no unused imports in the files changed for 1.1.
-- Every page reviewed in **both themes**: on a copy of the real store with demo budgets
-  added (`tools/render_pages.py`), and on the fictional demo household.
-- `tools/make_demo_store.py` builds a store that `check_store.py` passes with no
-  findings; the user guide's screenshots are generated from it.
-- `tools/privacy_scan.py --history`: no personal values in any publishable file or in the
-  committed history.
-- The live store was audited read-only: format v2, every balance matches its ledger. It
-  has no `budgets.json` yet - the app creates it (empty) on its next start.
+- **Test suite executed on Windows: 167 passed** (`run_tests.bat`, about 30 s). Besides the
+  unit tests it now runs four end-to-end suites through the real window and dialogs
+  (every dialog's own Save button and validation run; a dialog left open fails):
+  - `test_e2e_user_session` - one session across every page: accounts, transactions
+    (add, add-another, edit, duplicate, delete, search), budgets, income, SIP, term
+    insurance, stock look-up, EMI, goals, reminders, premium, exchange rate, theme,
+    backups and copy folder, projections, Ctrl+0 - then save, reopen from the files
+    in a fresh database, and `check_store.py` must report nothing. Balances are worked
+    out by hand at every step.
+  - `test_e2e_edit_fidelity` - for every record in the demo household, Edit then Save
+    without changes must leave the record identical.
+  - `test_e2e_more_flows` - every *New* menu entry, every form's validation message,
+    one-click SIP / EMI logging from the Dashboard, Reconcile, Track in Liabilities,
+    *Add budget* from the banner, the backup copy folder, and a 3,000-row ledger
+    staying responsive through a theme change.
+  - `test_e2e_startup` - the real `main.py` in a child process: first start, a second
+    copy, a damaged file, a newer data format, an old-format upgrade, a leftover
+    `app.db`, data from beside an old `.exe`, a hard kill and relaunch, and an error
+    inside a handler (reported, app keeps running).
+- **Scale:** a synthetic 30-year store (35,000 transactions, 6,000 snapshots) opens in
+  0.3 s, builds its window in 0.3 s, refreshes any page in under 0.1 s, shows *All
+  time* in 0.7 s, switches theme in 0.6 s and saves a change in 0.4 s.
+- **The `.exe`:** built with the project's spec (into a scratch folder) and launched
+  off-screen with throwaway data folders: first start, relaunch after a hard kill,
+  import of data kept beside an old build, killed before its first save, and a store
+  left with no categories by the old bug (it heals). The build script's set-aside of
+  beside-the-exe data was checked for a successful and a failed build.
+- `compileall` clean; layering rule holds; no hex colours or hand-built ₹ strings in
+  Python; no unused imports in any Python file in the repo.
+- Every page reviewed in **both themes**; the changed dialogs looked at as well.
+- `tools/privacy_scan.py --history`: no personal values in any publishable file or in
+  the committed history.
+- The live store was audited read-only: format v2, every balance matches its ledger.
 
-Not verified: the PyInstaller `.exe` has **not been rebuilt** since 1.0, so the
-`%APPDATA%` data location and the one-time import from the old beside-the-exe folder are
-tested only by reading the code. Run `run_build_exe.bat` and launch it once.
+Not verified: a person clicking through the built `.exe` on the desktop (it was
+launched off-screen only), and macOS / Linux.
 
 ---
 
@@ -47,6 +65,7 @@ tested only by reading the code. Run `run_build_exe.bat` and launch it once.
 | Shortcuts | Ten pages: Ctrl+1 … Ctrl+9 and Ctrl+0 (an eleventh page would get none; a test guards it) |
 | Docs | User guide with screenshots of a fictional household; skills for budgets, the user guide and releasing; MIT license; changelog |
 | Publishing | Privacy scan tool; demo-data generator; `.gitattributes`; personal figures removed from docs and tests |
+| End-to-end testing | Found and fixed: SIP / mutual fund form crashed the app; unexpected errors closed the app silently (now reported); a long ledger froze the app for minutes on a theme change; categories lost for good if the app closed within a second of its first start; Edit + Save erased creation dates and invented dates / zeroed a card's principal; three forms ignored Save silently; rebuilding the `.exe` deleted beside-the-exe data; "Rs" and Western grouping in two forms; batch files named a missing script; the lock file was visible to git |
 
 The two live-data steps from 1.0 (removing the test accounts, upgrading the store to
 format v2) were completed on 2026-11-06.
@@ -85,13 +104,13 @@ format v2) were completed on 2026-11-06.
 
 | # | Gap | Notes |
 |---|-----|-------|
-| 1 | `.exe` not rebuilt or tested since 1.0 | See Health |
+| 1 | The `.exe` is tested off-screen only | Built and launched in five scenarios (see Health); not clicked through by a person on the desktop |
 | 2 | Spending history is sparse | Projections use the last six months of logged expenses, so they stay optimistic until spending is logged regularly; the page warns |
 | 3 | No price / NAV refresh | By design (no network). Update values by hand |
 | 4 | Credit-card account balance sign is undefined | Treat card debt as a liability; card *accounts* are excluded from cash totals |
 | 5 | Categories are fixed | No screen to add or rename categories (budgets can only use the seeded ones); new seed categories never reach existing stores |
 | 6 | Budget limits have no history | Past periods are compared with today's limit; no rollover of unspent amounts |
-| 7 | UI tests are smoke-level | Pages build, switch and re-theme with data; budgets are driven end to end; other dialogs are not click-tested |
+| 7 | End-to-end tests drive dialogs through their handlers | Every page and form is exercised and its Save button clicked, but menus, mouse clicks on tiles and keyboard focus are not simulated |
 | 8 | Old dialogs (goal, holding, income, liability) keep their dense forms | Restyled, not redesigned |
 
 ---

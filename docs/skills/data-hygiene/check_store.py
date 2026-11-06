@@ -196,6 +196,13 @@ def check_ledger(tables: dict, store_version: int) -> None:
                          f"by {money(diff)} (Accounts -> Reconcile)")
 
 
+def check_categories(store: Path, tables: dict) -> None:
+    if (store / "categories.json").exists() and not tables.get("categories.json"):
+        flag("MED", "categories.json is empty - the app was closed before its first save. "
+                    "Version 1.1.0 and later put the built-in categories back on the next "
+                    "start; older versions show no categories at all")
+
+
 def check_budgets(tables: dict) -> None:
     """Budgets the app would ignore, or that would stop it from starting."""
     kinds = {c.get("id"): (c.get("kind"), c.get("name")) for c in tables.get("categories.json") or []}
@@ -296,6 +303,7 @@ def main() -> int:
     check_currency(tables)
     check_dates(tables)
     check_budgets(tables)
+    check_categories(store, tables)
     check_ledger(tables, store_version)
 
     print()

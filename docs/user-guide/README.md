@@ -361,6 +361,7 @@ Nothing leaves your computer unless you copy it somewhere yourself.
 | You see | What to do |
 |---------|------------|
 | *Personal Finance Manager is already open* | Only one copy runs at a time, because two would overwrite each other's changes. Look for the open window on the taskbar. |
+| *Something went wrong, so that last action didn't finish* | The app hit an unexpected problem and kept running. Everything saved before it is safe. If something looks wrong, close and reopen the app. The message names the log file that holds the details. |
 | *Your data file "…" is not valid JSON* (or similar) at start-up | Nothing has been changed. Restore that one file from your newest backup (see [Restoring a backup](#13-your-data-and-backups)) and start again. |
 | *The balance doesn't match its transactions* | Open the account and press **Reconcile**. |
 | Balances or spending in another currency are missing from totals | Add an exchange rate in **Settings → Exchange rates**. |

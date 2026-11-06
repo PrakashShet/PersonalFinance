@@ -42,6 +42,45 @@ def empty_store(tmp_path: Path) -> Path:
     return store
 
 
+@pytest.fixture(autouse=True)
+def _destroy_windows_after_each_test():
+    """Destroy every window a test leaves behind.
+
+    A closed window still exists and still reacts to the theme and data signals
+    of the shared singletons - after its test's database is closed. Deleting it
+    disconnects it, so no test can disturb the next one.
+    """
+    yield
+    from PyQt6.QtCore import QEvent
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is None:
+        return
+    for widget in app.topLevelWidgets():
+        widget.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+
+
+@pytest.fixture
+def isolated_app_db(tmp_path: Path, empty_store: Path):
+    """Connect the app's shared ``db`` to an isolated database while a UI test runs.
+
+    Windows created by earlier tests stay alive and still react to theme changes;
+    with the shared connection open they refresh harmlessly instead of failing.
+    """
+    from db.connection import db
+
+    db.connect(tmp_path / "ui_smoke.db")
+    db.apply_schema(SCHEMA_PATH)
+    run_migrations(db)
+    loader = DataLoader(db)
+    loader.load_seed_data(settings.SEED_DIR)
+    loader.load_store_data(empty_store)
+    yield db
+    db.close()
+
+
 @pytest.fixture
 def bootstrapped_session(tmp_path: Path, empty_store: Path):
     """Isolated DB hydrated from seed + empty store (mirrors app bootstrap)."""
