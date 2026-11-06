@@ -1,145 +1,103 @@
-# Status — Personal Finance Manager
+# Status - Personal Finance Manager
 
 **Single source of truth for the current state of this project.** Update this file in
 place; don't add another planning document. Superseded plans live in `docs/archive/`.
 
 - Architecture and conventions → `CLAUDE.md`
-- Setup and usage → `README.md`
+- Setup and usage → `README.md` and the user guide (`docs/user-guide/`)
+- What changed in each version → `CHANGELOG.md`
 - Task playbooks → `docs/skills/`
 
-**Last verified against the code:** 2026-07-20.
+**Last verified against the code:** 2026-11-06 (version 1.1.0, store format v2).
 
 ---
 
 ## Health
 
-Architecture is sound and the codebase is in good shape. ~12k LOC across a clean
-`models → repositories → services → ui` stack.
+Verified this pass, by running things - not asserted:
 
-Verified this pass, not just asserted:
+- **Test suite executed on Windows: 147 passed** (`run_tests.bat`). Includes hand-worked
+  budget numbers, a save → reload round trip for budgets, a smoke test that drives the
+  Budgets page, the Dashboard alert, the expense-dialog hint and *See transactions*, and
+  a regression test that coloured (toned) labels really show their colour.
+- `compileall` clean; layering rule holds (no `db` / `repositories` imports in `ui/`); no
+  hex colours in Python; no unused imports in the files changed for 1.1.
+- Every page reviewed in **both themes**: on a copy of the real store with demo budgets
+  added (`tools/render_pages.py`), and on the fictional demo household.
+- `tools/make_demo_store.py` builds a store that `check_store.py` passes with no
+  findings; the user guide's screenshots are generated from it.
+- `tools/privacy_scan.py --history`: no personal values in any publishable file or in the
+  committed history.
+- The live store was audited read-only: format v2, every balance matches its ledger. It
+  has no `budgets.json` yet - the app creates it (empty) on its next start.
 
-- Every Python file compiles (`compileall`, clean)
-- **Layering rule holds** — zero `db` / `repositories` imports anywhere in `ui/`
-- No `TODO` / `FIXME` / `HACK` markers in application code
-- All 12 services and all 9 repositories have unit-test files
-- 8 nav views, all wired through `AppContext`
+Not verified: the PyInstaller `.exe` has **not been rebuilt** since 1.0, so the
+`%APPDATA%` data location and the one-time import from the old beside-the-exe folder are
+tested only by reading the code. Run `run_build_exe.bat` and launch it once.
 
-Not verified: the test suite has **not been executed**. See gap #4.
+---
+
+## Done in 1.1
+
+| Area | Change |
+|------|--------|
+| Budgets | Monthly or yearly limit per expense category; Budgets page (spent, left, per-day allowance, last 6 months / 3 years, spending without a limit); limit suggested from recent spending; hint in the expense dialog; *Needs attention* alerts; calendar or financial year (Settings); audit checks |
+| Colours | Red / green values on KPI, stat, row and tile labels never showed (an `#id` rule outranked `[tone]`) - fixed for every page, with a regression test |
+| Layout | A long selected option in a segmented control lost its last letters; detail-panel sections sat 9 px off the header - both fixed |
+| Shortcuts | Ten pages: Ctrl+1 … Ctrl+9 and Ctrl+0 (an eleventh page would get none; a test guards it) |
+| Docs | User guide with screenshots of a fictional household; skills for budgets, the user guide and releasing; MIT license; changelog |
+| Publishing | Privacy scan tool; demo-data generator; `.gitattributes`; personal figures removed from docs and tests |
+
+The two live-data steps from 1.0 (removing the test accounts, upgrading the store to
+format v2) were completed on 2026-11-06.
+
+---
+
+## Closed in 1.0
+
+| Was | Fix |
+|-----|-----|
+| Non-atomic store writes | Temp file + `os.replace`; unchanged files not rewritten; refuses to empty a large file |
+| Damaged file → overwritten 60 s later | Store validated before anything loads; app stops with recovery steps, nothing written |
+| No version control | git repo; personal data excluded from it |
+| Projections never spent the portfolio | Deficits paid from cash then investments; post-retirement return used; "runs out at age X" shown |
+| Balances not explained by transactions | Ledger invariant (format v2): opening balances and hand edits become `adjustment` entries; Reconcile action; audit check |
+| Opening balances counted as income | `adjustment` type, excluded from income/spending/savings |
+| Dashboard trend chart & reminders never rendered (`db` NameError hidden by `except: pass`) | Service methods; dashboard failures are logged, never swallowed |
+| Term insurance in investment returns (permanent −100% "worst mover") | Reported separately as *protection* |
+| `xirr` unhardened, unused | Raises on invalid input, bisection fallback; surfaced per holding and portfolio |
+| `fv_of_sip` docstring wrong | Documented as annuity-due, with its exact inverse |
+| No FX layer | `fx_rates` table; balances without a rate are reported, never summed as rupees |
+| No `stock_master` table | Table + seed load; typing a symbol fills market cap / sector |
+| No `MasterDetailView` base | Five list pages share one base; six tile classes became one `ListTile` |
+| Additive-only migrations | Versioned JSON store migrations (`services/store_migrations.py`); SQLite rebuilt in memory each launch |
+| No recurring posting | *Needs attention*: SIPs, EMIs, premiums, income, maturities, reminders - one-click logging that also updates the holding / loan |
+| Loan double-entry soft warning | Account shows whether its loan is tracked; one click creates the linked liability |
+| `.exe` data inside `dist/` (wiped by rebuild) | `%APPDATA%\PersonalFinanceManager`; old location imported once |
+| Backups: 30 newest, same disk, shutdown only | Startup + shutdown + manual; tiered retention (30 newest + daily/monthly/yearly); optional second-copy folder |
+| Two app copies could overwrite each other | Single-instance lock |
+| Old DBs' nulls in `NOT NULL` columns made a fresh load crash | Loader applies the column default |
+| Dark-only theme with ~140 hardcoded colours | Light / dark / match Windows; tokens + one stylesheet template; validated chart palette |
 
 ---
 
 ## Open gaps
 
-Ordered by value, not by size. Each was re-confirmed by reading the code on 2026-07-20.
-
-### 1. Store writes are not atomic — *durability*
-
-`DataPersister.dump_store_data` calls `out_path.write_text(...)` straight over each live
-JSON file. A crash or power loss mid-write truncates that file. Autosave re-runs this
-every 60s with `make_backup=False`, so the exposure is continuous.
-
-For an app whose whole premise is "the JSON files are the source of truth for 30 years,"
-this is the weakest link. Fix: write `<name>.tmp`, then `os.replace()` — atomic on both
-Windows and POSIX.
-
-### 2. Junk data in the live store — *data correctness*
-
-Account `qwe` (id=7) holds **₹50,00,000** with `is_active=1`. Also an inactive `test1`.
-The ₹50L is in every net-worth figure the app has reported and is baked into all 14
-recorded `net_worth_snapshots` — deleting the account will not retroactively fix those.
-
-Real net worth is roughly **−₹27L**, not the **+₹23L** currently displayed.
-
-Run `python docs/skills/data-hygiene/check_store.py` to reproduce.
-
-### 3. No version control — *risk*
-
-A well-written `.gitignore` exists but there is no `.git` directory. 12k LOC with no
-history, no diffs, no way back. `git init` is a two-minute fix and gates safe work on
-everything else here.
-
-### 4. Test suite is unverified
-
-A prior pass added 15 test files (7 repository, 8 service) that were only `py_compile`d,
-never executed — the sandbox had no PyQt6 and no network. Coverage *looks* complete but
-suite-green is an assumption. Run `run_tests.bat` on Windows to establish a baseline.
-
-### 5. `xirr` is unhardened and unused
-
-`utils/calculators.xirr` promises a bisection fallback in its docstring that was never
-implemented. On input with no sign change it returns ~2e10 rather than raising. Nothing
-calls it outside tests — latent, not live, but it's the first function you'd reach for
-when surfacing portfolio returns.
-
-### 6. `fv_of_sip` docstring contradicts its math
-
-Says "end-of-period payment"; the trailing `* (1 + r)` makes it an annuity-due
-(beginning-of-period), ~1% higher. Self-consistent — `required_monthly_sip` round-trips
-exactly — so this is a documentation bug, not a math bug. Worth resolving deliberately
-given the 30-year projections built on it.
-
-### 7. No FX layer
-
-`account_repo.total_balance`, `holding_repo.total_current_value`, and
-`liability_repo.total_outstanding` are plain `SUM()` with no currency conversion.
-`AppContext.has_mixed_currencies()` exists but its result never adjusts totals. All 7
-accounts are currently INR, so this is latent — it becomes a live correctness bug the
-moment a foreign-currency account is added.
-
-### 8. No `stock_master` table
-
-`services/data_loader.py` guards on `_table_exists("stock_master")`, but `schema.sql`
-never creates it — so that block is a permanent no-op and `data/seed/stock_master.csv`
-ships unused. Market-cap classification must be entered by hand per holding.
-
-### 9. No `MasterDetailView` base widget
-
-`accounts`, `goals`, `investments`, `liabilities`, and `income` views each re-implement
-the same tile-list + detail-pane layout and selection handling. Deferred twice as
-"large refactor, low risk if deferred" — still true. If a sixth such view is ever added,
-extract the base class first.
-
-### 10. Additive-only migrations
-
-`db/migrate.py` can add columns and nothing else. `SCHEMA_VERSION` is a hardcoded `1`
-and `db/migrations/` holds only a README. No path for renames, drops, retypes, or
-backfills — fine so far, thin for a schema meant to evolve over decades.
-
-### 11. No recurring auto-posting
-
-Only income has a recurring flag and a pending-sources check. `holdings.sip_amount`,
-`holdings.premium_due_date`, `liabilities.emi_amount`, and `liabilities.next_due_date`
-all exist, but nothing posts ledger transactions from them — every SIP, EMI, and premium
-is logged by hand each month. This is the biggest day-to-day usability gap.
-
-### 12. Loan double-entry is a soft warning only
-
-`AppContext.account_has_loan_fields()` triggers a UI reminder when an account carries
-loan fields, but nothing prevents or reconciles the same debt also existing as a
-`liabilities` row. Currently 2 liabilities and no account loan fields set, so no live
-double-count.
-
----
-
-## Suggested order
-
-1. `git init` (#3) — do this before touching anything else
-2. Atomic writes (#1) — small, self-contained, removes the standing data-loss risk
-3. Purge junk data (#2) — decide what to do about the contaminated snapshots
-4. Run `run_tests.bat` (#4) — establish a real baseline
-5. Then pick from #5–#12 by what you actually want the app to do
-
-Items #7–#12 are deliberate deferrals rather than oversights. None needs doing before
-the app is useful; each becomes worth doing when its trigger appears — a foreign-currency
-account, a sixth tile view, a schema rename, a missed SIP entry.
+| # | Gap | Notes |
+|---|-----|-------|
+| 1 | `.exe` not rebuilt or tested since 1.0 | See Health |
+| 2 | Spending history is sparse | Projections use the last six months of logged expenses, so they stay optimistic until spending is logged regularly; the page warns |
+| 3 | No price / NAV refresh | By design (no network). Update values by hand |
+| 4 | Credit-card account balance sign is undefined | Treat card debt as a liability; card *accounts* are excluded from cash totals |
+| 5 | Categories are fixed | No screen to add or rename categories (budgets can only use the seeded ones); new seed categories never reach existing stores |
+| 6 | Budget limits have no history | Past periods are compared with today's limit; no rollover of unspent amounts |
+| 7 | UI tests are smoke-level | Pages build, switch and re-theme with data; budgets are driven end to end; other dialogs are not click-tested |
+| 8 | Old dialogs (goal, holding, income, liability) keep their dense forms | Restyled, not redesigned |
 
 ---
 
 ## Environment note
 
-The Linux sandbox used for analysis **cannot run this project's tests**: `.venv` is a
-Windows venv holding `.exe` binaries, and there is no network access to install PyQt6 or
-pytest. Static checks (`compileall`, layering greps, the store audit) work fine there;
-anything requiring Qt must run on Windows via `run_tests.bat`.
-
-Any pass that couldn't run the tests should say so explicitly rather than implying green.
+Tests need the project's Windows `.venv` (PyQt6 + pytest-qt). `tests/conftest.py`
+points `PFM_HOME` at a temporary folder, so tests never touch real data or logs.
+A Linux sandbox can still run `compileall`, the layering grep and `check_store.py`.

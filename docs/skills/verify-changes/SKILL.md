@@ -1,101 +1,103 @@
 ---
 name: verify-changes
-description: Verification checklist before calling work on the Personal Finance Manager done. Use after editing any Python in this repo, before reporting a task complete, or when deciding whether a change is safe to trust. Covers syntax, the layering rule, persistence wiring, tests, and honest reporting of what could not be run.
+description: Verification checklist before calling work on the Personal Finance Manager done. Use after editing any Python in this repo, before reporting a task complete, or when deciding whether a change is safe to trust. Covers syntax, the layering rule, persistence wiring, tests, a look at the UI, financial math and honest reporting of what could not be run.
 ---
 
 # Verifying a change
 
-The rule that matters most: **report what you actually ran.** A prior pass added 15
-test files, never executed them, and left the docs implying a green suite. Don't repeat
-that.
+The rule that matters most: **report what you actually ran.** An earlier pass
+added 15 test files, never ran them, and left the docs implying the suite passed.
+Don't repeat that.
 
-## Tier 1 — always, works anywhere
-
-```bash
-# Every file still parses
-python3 -m compileall -q -x '(\.venv|build|dist)' .
-
-# The layering rule: ui must never touch db or repositories
-grep -rn "from db\|from repositories" ui/          # must print nothing
-
-# No debug leftovers
-grep -rn "print(\|breakpoint()\|import pdb" --include=*.py \
-     services/ ui/ db/ repositories/ utils/ models/ config/
-```
-
-`compileall` is silent on success. The `grep` for `ui/` must return zero lines — if a
-view needs data, add a service method or an `AppContext` helper instead.
-
-## Tier 2 — when you touched persistence
-
-Any new table or column means checking both directions, because failure here is silent
-until the next restart:
+## Tier 1 - always, works anywhere
 
 ```bash
-grep -n "<table>" services/data_loader.py services/data_persister.py   # both must hit
+python -m compileall -q -x '(\.venv|build|dist)' .                    # every file parses (silent = OK)
+grep -rn "from db\|from repositories" ui/                              # must print nothing
+grep -rnE "#[0-9a-fA-F]{6}" ui/views ui/widgets ui/dialogs ui/helpers --include=*.py   # no colours in Python
+grep -rn "print(\|breakpoint()\|import pdb" --include=*.py services/ ui/ db/ repositories/ utils/ models/ config/
 ```
 
-`STORE_LOAD_ORDER` is `(filename, table)`; `STORE_DUMP_ORDER` is `(table, filename)` —
-reversed. Both must respect FK order.
+If a view needs data, add a service method or an `AppContext` helper. A view
+never imports a repository.
 
-New column on an existing table? It must be in **both** `db/schema.sql` (for fresh DBs)
-and `db/migrate.py::_additions()` (for existing ones). Schema alone leaves every current
-database without the column.
+## Tier 2 - when you touched persistence
 
-Then verify the data actually survives a restart:
+SQLite runs in memory and is rebuilt from `db/schema.sql` and the JSON store at
+every launch, so a schema change never needs an SQLite migration. What it does
+need:
 
-```bash
-python docs/skills/data-hygiene/check_store.py    # orphans, junk, silent zeros
-```
+- **New table:** an entry in both `STORE_LOAD_ORDER` (`services/data_loader.py`,
+  `(filename, table)`) and `STORE_DUMP_ORDER` (`services/data_persister.py`,
+  `(table, filename)` - note the order is reversed), each placed after the tables
+  it references. Add it to `STORE_FILES`, and its foreign keys to `LINKS`, in
+  `docs/skills/data-hygiene/check_store.py`.
 
-## Tier 3 — the real test suite (Windows only)
+  ```bash
+  grep -n "<table>" services/data_loader.py services/data_persister.py docs/skills/data-hygiene/check_store.py
+  ```
+
+- **New column:** `db/schema.sql` only. A `NOT NULL` column needs a `DEFAULT`,
+  because existing records won't have the key.
+- **Changed meaning** (a rename, retype or backfill): a store migration in
+  `services/store_migrations.py`, which bumps `STORE_VERSION` and runs once
+  after a backup.
+- Don't create files in the live `data/store/`. The loader creates a missing
+  file as `[]` on the next start.
+
+## Tier 3 - the test suite (Windows `.venv`)
 
 ```bat
-run_tests.bat              :: everything
-run_tests.bat -m smoke     :: E2E + UI launch only
+run_tests.bat              :: everything - 147 tests, about 10 s, as of 1.1.0
+run_tests.bat -m smoke     :: E2E + UI only
 ```
 
-Needs PyQt6, pytest, pytest-qt and the project's `.venv`. **These cannot run in a Linux
-sandbox** — the venv holds Windows `.exe` binaries and there's no network to install
-PyQt6. When blocked, say so plainly:
+`tests/conftest.py` points `PFM_HOME` at a temporary folder, so tests never touch
+real data. Use the fixtures: `temp_db` (empty schema), `empty_store`,
+`bootstrapped_session`, and `isolated_app_db` in the smoke tests. A smoke test
+that emits `theme.changed` needs `isolated_app_db`, because windows left over
+from earlier tests are still listening.
 
-> Ran compileall and the layering check, both clean. Could not run pytest —
-> PyQt6 isn't installable in this environment. Please run `run_tests.bat`.
+The suite needs PyQt6, pytest and pytest-qt from the project's `.venv`. Where
+that can't run (a Linux sandbox, for example), say so plainly:
 
-Not "tests should pass."
+> Ran compileall and the layering check, both clean. Could not run pytest:
+> PyQt6 isn't installable here. Please run `run_tests.bat`.
 
-Use the fixtures in `tests/conftest.py` rather than building a DB by hand: `temp_db`
-(schema + migrations, empty), `empty_store` (writable store of `[]` files),
-`bootstrapped_session` (mirrors real app bootstrap).
+Not "tests should pass".
 
-## Tier 4 — manual round-trip, for anything touching data
+## Tier 4 - round trip and a look, for anything touching data or UI
 
-The only proof that persistence works end to end:
+Work on a **copy**. Never test against the live `data/store/`, which holds real
+financial data.
 
-1. `run.bat`, make the change through the UI, quit cleanly
-2. Confirm it landed in the right `data/store/*.json`
-3. Delete `data/app.db`, relaunch, confirm it is still there
+1. Copy the store into a scratch `PFM_HOME`, or build the demo:
+   `python tools/make_demo_store.py <new folder>`.
+2. `run.bat` with `PFM_HOME` set, make the change through the UI, then quit.
+3. Confirm the change landed in `<PFM_HOME>/data/store/*.json`, then relaunch and
+   confirm it is still there. This catches a missing load-order entry.
+4. `python docs/skills/data-hygiene/check_store.py --store <PFM_HOME>/data/store`
+   must report no new findings (it checks the ledger invariant).
+5. UI changes: `python tools/render_pages.py --store <copy> --out shots`, then
+   **look** at both themes. If users will see the change, also run the
+   **user-guide** skill.
 
-Step 3 is the one that catches a missing `STORE_LOAD_ORDER` entry.
-
-If you touched a **service mutation**, also check cross-tab refresh: edit a record in
-one tab, navigate to another tab that displays it, confirm it updated. The chain is
-`service → on_change(topic) → events.changed → view._dirty → ensure_fresh()`. A service
-that mutates without calling `on_change` leaves other tabs stale.
+If you touched a service mutation, check the refresh chain too: change a record
+on one page, open another page that shows it, and confirm it updated
+(`service → on_change(topic) → events.changed → page._dirty → ensure_fresh()`).
 
 ## Financial math
 
-Changes to `utils/calculators.py` need a hand-checked number, not just a green test —
-the tests were written against the current implementation and will happily confirm a
-wrong formula. Two known traps:
+Changes to `utils/calculators.py` and other money logic need numbers worked out by
+hand, not just a passing test. Tests written against the current implementation
+will happily confirm a wrong formula.
 
-- `fv_of_sip` is an **annuity-due** (trailing `* (1 + r)`) despite its docstring saying
-  "end-of-period". `required_monthly_sip` round-trips with it exactly. If you "fix" one,
-  fix both or you break the round-trip.
-- `xirr` has no convergence guard: on input with no sign change it returns ~2e10 rather
-  than raising. Harden it before any caller relies on it.
+- `fv_of_sip` is an annuity-due (contributions at the start of each period), and
+  `required_monthly_sip` is its exact inverse. Change both or neither.
+- `xirr` raises `ValueError` when no rate exists. Callers show nothing (`None`)
+  rather than a made-up figure.
 
-Sanity values to check against:
+Sanity values:
 
 ```python
 emi(3820000, 0.085, 240)        # ≈ 33150.85
@@ -105,11 +107,10 @@ xirr([(0, -100), (365, 110)])   # ≈ 0.10
 
 ## Before reporting done
 
-- [ ] `compileall` clean
-- [ ] `ui/` imports no `db` / `repositories`
-- [ ] Persistence wired in both loader and persister (if a table changed)
-- [ ] Schema **and** `migrate.py` updated (if a column changed)
-- [ ] `check_store.py` shows no new findings
-- [ ] Tests run — or explicitly reported as not run, with the reason
-- [ ] `STATUS.md` gap table updated if this closed or opened a gap
-- [ ] No new planning document created
+- [ ] `compileall` clean; no `db`/`repositories` imports in `ui/`; no hex colours in Python
+- [ ] Persistence wired in the loader, the persister and `check_store.py` (if a table changed)
+- [ ] `check_store.py` shows no new findings on a copy
+- [ ] Tests run, with the count reported - or explicitly not run, with the reason
+- [ ] Screens looked at in both themes (if the UI changed); user guide updated if users see it
+- [ ] `STATUS.md` updated if this closed or opened a gap; no new planning document
+- [ ] Before any push: `python tools/privacy_scan.py --history` (see the **release** skill)

@@ -1,70 +1,75 @@
 ---
 name: data-hygiene
-description: Audit the Personal Finance Manager's data/store/*.json files for junk records, orphaned foreign keys, silent zero valuations, and mixed currencies. Use when net worth or dashboard numbers look wrong, before trusting a report, after bulk edits or imports, or as a periodic check on the real financial data.
+description: Audit the Personal Finance Manager's data/store/*.json files for balances the ledger doesn't explain, junk records, orphaned foreign keys, silent zero valuations, missing exchange rates and budgets the app can't use. Use when net worth or dashboard numbers look wrong, before trusting a report, after bulk edits or imports, or as a periodic check on the real financial data.
 ---
 
 # Auditing the store
 
-`data/store/*.json` is the source of truth — `data/app.db` is rebuilt from it on every
-boot. So every data problem is visible in those files, and every fix belongs there.
+`data/store/*.json` is the source of truth. SQLite is rebuilt from it in memory
+at every launch, so every data problem is visible in those files, and every fix
+belongs there, preferably made through the app.
 
 ## Run the audit
 
 ```bash
 python docs/skills/data-hygiene/check_store.py
+python docs/skills/data-hygiene/check_store.py --store <path>     # a backup, a copy, the demo
 ```
 
-Read-only: never writes, never touches `app.db`, safe with the app running.
-Exit `0` clean, `1` findings, `2` store unreadable. Use `--store <path>` to point at a
-backup under `data/user/backups/<timestamp>/` and compare against a known-good day.
+The audit is read-only: it never writes, and it is safe to run while the app is
+open. Exit codes: `0` clean, `1` findings, `2` store unreadable. To compare
+against a known-good day, point `--store` at a backup in
+`data/user/backups/<timestamp>/`.
 
-It prints row counts, recomputes net worth the same way `NetWorthService.compute` does
-(so you can diff it against the Dashboard), then lists findings by severity.
+It prints the store format version and row counts, then recomputes net worth the
+way `NetWorthService.compute` does (compare the figure with the Dashboard), and
+then lists its findings.
 
 ## What it checks, and why each matters
 
 | Check | Why it matters |
 |-------|----------------|
-| **Placeholder names** (`test`, `qwe`, `asdf`, `dummy`…) | Throwaway records left `is_active=1` silently inflate every total and get baked into `net_worth_snapshots` permanently |
-| **Orphaned FKs** | The JSON store has no FK enforcement — only SQLite does, at load. A dangling `account_id` either fails the boot load or silently detaches the row |
-| **Zero-valued holdings** | `total_current_value` sums `current_value`; a holding with money invested but `current_value` of 0/null contributes nothing and vanishes from net worth. Term insurance is excluded — it legitimately has no surrender value |
-| **Inactive rows with balances** | Aggregations filter on `is_active = 1`, so money in a deactivated account disappears from totals without warning |
-| **Duplicate debt** | A loan can exist as `accounts.loan_*` fields *and* a `liabilities` row. Only a soft UI nudge prevents this; nothing reconciles it |
-| **Mixed currencies** | Aggregations are plain `SUM()` with no FX conversion — a USD balance is added rupee-for-rupee. `has_mixed_currencies()` exists but does not adjust totals |
-| **Non-ISO dates** | Everything downstream assumes `YYYY-MM-DD`; `date.fromisoformat` raises or silently misparses otherwise |
+| **Ledger vs balance** (format v2+) | Every active account's balance must equal the sum of its transactions. A difference means the JSON was edited by hand or a write bypassed the ledger, and later edits to old entries will produce wrong balances. Fix in the app: Accounts → Reconcile |
+| **Placeholder names** (`test`, `qwe`, `asdf`, `dummy`…) | Throwaway records left active inflate every total and get baked into `net_worth_snapshots` |
+| **Orphaned foreign keys** | The JSON has no foreign-key enforcement, but SQLite enforces it at load, so a dangling id **stops the app from starting** (it fails closed and overwrites nothing) |
+| **Zero-valued holdings** | A holding with money invested but a `current_value` of 0 or null adds nothing to net worth. Term insurance is excluded, because it is protection, not an investment |
+| **Inactive rows with balances** | Totals only count `is_active = 1`, so money in an archived account is left out |
+| **Untracked loans** | A loan described on an account counts in net worth only once it is a liability linked by `liabilities.account_id` (Accounts → Track in Liabilities) |
+| **Missing exchange rates** | A non-INR balance without a row in `fx_rates.json` is left out of net worth and budgets (Settings → Exchange rates) |
+| **Budgets** | A duplicate (category, period) pair or a budget with no category **stops the app from starting**. An unknown period, a limit of 0 or less, or a budget on an income category is ignored or never fills up |
+| **Non-ISO dates** | Everything downstream assumes `YYYY-MM-DD` |
 
 ## Fixing findings
 
-**Close the app first.** It autosaves every 60 seconds and dumps the whole store on
-quit, so a running app will overwrite your edits.
+Most findings have an in-app fix: Reconcile, Archive, Track in Liabilities, an
+exchange rate, or editing or deleting a budget. For anything else:
 
-1. Back up: copy `data/store/` somewhere, or grab the newest `data/user/backups/<ts>/`
-2. Edit the offending JSON file directly
-3. Delete `data/app.db` (optional but clean — it is rebuilt from JSON on boot)
-4. Relaunch and confirm the Dashboard matches the script's recomputed net worth
+1. **Close the app.** It saves within a second of every change, and again when
+   it quits.
+2. **Back up.** Copy `data/store/`, or use Settings → Back up now before closing.
+3. **Edit the JSON file.** Keep it a list of objects, keep dates in ISO format,
+   and keep every `id` unique.
+4. **Relaunch.** If the file no longer parses, or a record points at something
+   missing, the app refuses to start and names the file. Nothing is
+   overwritten; fix it and try again.
+5. **Re-run the audit.** It catches orphans you have just created.
 
-**Prefer deletion over deactivation for junk.** Setting `is_active=0` keeps the row in
-history and in every existing snapshot. If a record was never real, remove it.
+**Historical snapshots don't correct themselves.** Each `net_worth_snapshots` row
+was computed from that day's data, so removing a bogus account today does not fix
+past rows. Correct them deliberately, with a small script that refuses to run if
+the data isn't exactly what it expects, and take a backup first.
 
-**Historical snapshots do not self-correct.** `net_worth_snapshots.json` holds one row
-per day the app ran, each computed from that day's data. Deleting a bogus account today
-does **not** fix yesterday's snapshot — the trend chart stays wrong. Either accept the
-discontinuity or hand-edit the affected snapshot rows.
-
-Before deleting a row, check nothing references it — `transactions.account_id`,
-`holdings.linked_account_id`, `liabilities.account_id`, `income_sources.deposit_account_id`,
-`goal_holdings.{goal_id,holding_id}`, `holding_valuations.holding_id`. Re-run the script
-after editing; it will catch orphans you just created.
-
-## Known outstanding finding
-
-The live store currently contains an account named **`qwe`** (id=7) holding
-₹50,00,000 with `is_active=1`. It is placeholder data, it is in every net-worth figure
-the app reports, and it has already contaminated the recorded snapshots. Removing it
-moves net worth from roughly +₹23L to about −₹27L, which is the real number.
+Before deleting a row, check that nothing references it:
+`transactions.account_id` / `counter_account_id` / `category_id`,
+`holdings.linked_account_id`, `liabilities.account_id`,
+`income_sources.deposit_account_id`, `goal_holdings.*`,
+`holding_valuations.holding_id`, `budgets.category_id`.
 
 ## Extending the script
 
-`LINKS` maps child file → `[(field, parent file)]`; add an entry when a new FK appears.
-`JUNK_NAME` is the placeholder-name regex. `STORE_FILES` must stay in sync with
-`STORE_LOAD_ORDER` in `services/data_loader.py`.
+- `STORE_FILES` must stay in sync with `STORE_LOAD_ORDER` in `services/data_loader.py`.
+- `LINKS` maps each child file to `[(field, parent file)]`. Add an entry when a new
+  foreign key appears.
+- `_effects` mirrors `services/ledger.effects`. Change them together.
+- The script uses plain Python and no project imports, on purpose: it must still
+  run when the app itself can't.

@@ -6,6 +6,9 @@ description: Add a new first-class entity (table + model + repo + service + view
 # Adding a first-class entity
 
 Worked example: adding **PPF accounts** as their own entity rather than a `holding`.
+The newest real one, wired end to end, is **budgets** (table, model, repo, service,
+page, dialog, audit check, demo data, user guide) - see the **budgets** skill for the
+file list.
 
 **Decide first: does this need to be an entity at all?** `holdings` is deliberately
 polymorphic (SIP, FD, stock, gold, insurance, bonds, NPS…). If the new thing is just
@@ -40,9 +43,9 @@ if the entity is edited in place (not every table has it).
 Foreign keys use `ON DELETE CASCADE` for owned rows and `ON DELETE SET NULL` for
 optional links. FK enforcement is on, so a bad reference raises at insert.
 
-A whole new table needs no migration entry — `apply_schema` runs
-`CREATE TABLE IF NOT EXISTS` on every boot. Only new *columns* on *existing* tables
-need `db/migrate.py::_additions()`.
+No SQLite migration is ever needed: the database is rebuilt in memory from
+`schema.sql` on every launch, so a new table or column simply exists. (A new
+`NOT NULL` column needs a `DEFAULT`, because existing records won't have the key.)
 
 ### 2. Model — `models/ppf.py`
 
@@ -119,10 +122,15 @@ it references. `ppf` referencing `accounts` goes after `accounts`.
 **Miss the loader entry** → data never loads back after restart.
 **Miss the persister entry** → data never reaches disk; lost on quit. Silent both ways.
 
-### 6. Store file — `data/store/ppf.json`
+### 6. Store file and audit
 
-Create it containing `[]`. The loader creates it if missing, but committing it
-explicitly keeps the store directory self-describing.
+Don't create `data/store/ppf.json` yourself - the live store is real data, and the
+loader creates a missing file as `[]` on the next start (the tests' `empty_store`
+fixture follows `STORE_LOAD_ORDER` automatically).
+
+Do teach the audit about it: add `"ppf.json"` to `STORE_FILES` in
+`docs/skills/data-hygiene/check_store.py`, its foreign keys to `LINKS`, and a check for
+any value that would stop the app from starting or be silently ignored.
 
 ### 7. Wire into `AppContext` — `services/app_context.py`
 
@@ -135,27 +143,41 @@ explicitly keeps the store directory self-describing.
 ### 8. View — `ui/views/ppf_view.py` + register it
 
 See the **add-view** skill for the full view pattern. Register in
-`ui/main_window.py::NAV_ITEMS`; position in that list is the sidebar order.
+`ui/main_window.py::NAV`; position in that list is the sidebar order (ten pages at
+most - Ctrl+1 … Ctrl+0). Add it to the sidebar's **New** menu too.
+
+### 9. Demo data and the user guide
+
+Give the demo household some of the new records (`build()` in
+`tools/make_demo_store.py`), regenerate the guide's screenshots
+(`python tools/make_user_guide.py`) and add a section to `docs/user-guide/README.md`.
+See the **user-guide** skill.
 
 ## Verification
 
 ```bash
 python3 -m compileall -q -x '(\.venv|build|dist)' .
 grep -rn "from db\|from repositories" ui/                          # must be empty
-grep -n "ppf" services/data_loader.py services/data_persister.py   # both must hit
+grep -n "ppf" services/data_loader.py services/data_persister.py docs/skills/data-hygiene/check_store.py   # all three must hit
 ```
 
-Then the round-trip that actually proves it — on Windows:
+Then the round-trip that actually proves it - on a **copy** of the data (`PFM_HOME`
+pointing at a scratch folder):
 
-1. `run.bat`, add one record through the UI, quit cleanly
-2. Confirm the record is in `data/store/ppf.json`
-3. Delete `data/app.db`, relaunch, confirm the record is still shown
+1. `run.bat`, add one record through the UI, quit
+2. Confirm the record is in `<PFM_HOME>/data/store/ppf.json`
+3. Relaunch (SQLite is rebuilt in memory from the files) and confirm it is still shown
 
 That sequence is the only real proof steps 5 and 6 are correct. Add cases to
 `tests/test_repositories/` and `tests/test_services/` using the `temp_db` and
-`bootstrapped_session` fixtures from `tests/conftest.py`.
+`bootstrapped_session` fixtures, and a load/save case in `tests/test_services/test_storage.py`.
+
+**Changing an existing entity's fields or meaning** (rename, retype, backfill)? That is a
+store migration: bump `STORE_VERSION` and add a step in `services/store_migrations.py`
+(it runs once, after a backup, and is written back only if it loads). A brand-new
+column with a default needs no migration - old records simply lack the key.
 
 ## Finally
 
-Update the gap table in `STATUS.md` if this closes a known gap. Don't create a new
-planning document.
+Update the gap table in `STATUS.md` if this closes a known gap, and add a line to
+`CHANGELOG.md`. Don't create a new planning document.
