@@ -34,7 +34,14 @@ on your computer as plain files you can read in 20 years.
 
 ### Install
 
-**Windows (recommended).** Install [Python 3.10 or newer](https://www.python.org/downloads/)
+**Windows, ready-made (easiest).** Download the repository from GitHub (**Code →
+Download ZIP**) and unzip it. Then open `dist\PersonalFinanceManager` and run
+**PersonalFinanceManager.exe**. No installation and no Python needed. Keep the
+folder together, because the app needs its `_internal` folder. If Windows says
+*Windows protected your PC*, choose **More info → Run anyway**: the app isn't
+code-signed.
+
+**Windows, from source.** Install [Python 3.10 or newer](https://www.python.org/downloads/)
 and tick *Add python.exe to PATH* in the installer. Then, in the app's folder:
 
 | Double-click | What it does |

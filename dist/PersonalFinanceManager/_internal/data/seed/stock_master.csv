@@ -1,0 +1,19 @@
+symbol,name,exchange,market_cap,sector
+RELIANCE,Reliance Industries Ltd,NSE,large_cap,Energy
+TCS,Tata Consultancy Services,NSE,large_cap,IT
+HDFCBANK,HDFC Bank,NSE,large_cap,Banking
+INFY,Infosys,NSE,large_cap,IT
+ICICIBANK,ICICI Bank,NSE,large_cap,Banking
+ITC,ITC Limited,NSE,large_cap,FMCG
+LT,Larsen & Toubro,NSE,large_cap,Construction
+SBIN,State Bank of India,NSE,large_cap,Banking
+TATAMOTORS,Tata Motors,NSE,large_cap,Auto
+BAJFINANCE,Bajaj Finance,NSE,large_cap,NBFC
+TATAPOWER,Tata Power,NSE,mid_cap,Power
+PERSISTENT,Persistent Systems,NSE,mid_cap,IT
+TRENT,Trent Limited,NSE,mid_cap,Retail
+BHEL,Bharat Heavy Electricals,NSE,mid_cap,Capital Goods
+CESC,CESC Limited,NSE,small_cap,Power
+RAILTEL,RailTel Corporation,NSE,small_cap,Telecom
+KFINTECH,KFin Technologies,NSE,small_cap,Financial Services
+EASEMYTRIP,Easy Trip Planners,NSE,small_cap,Travel

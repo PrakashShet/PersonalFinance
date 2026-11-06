@@ -29,9 +29,16 @@ data/cache/*
 .DS_Store
 Thumbs.db
 
-# PyInstaller
+# PyInstaller. build/ is scratch. dist/ is ignored except the released app
+# folder (the .exe and _internal) - never anything an app writes beside itself:
+# builds before 1.0 kept their data, backups and app.db in data/ there.
 build/
-dist/
+dist/*
+!dist/PersonalFinanceManager/
+dist/PersonalFinanceManager/data/
+dist/PersonalFinanceManager/logs/
+# *.py[cod] above also matches .pyd - the app's compiled modules (QtCore.pyd...).
+!dist/PersonalFinanceManager/**/*.pyd
 
 # Test
 .pytest_cache/

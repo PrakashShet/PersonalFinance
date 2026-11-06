@@ -45,6 +45,12 @@ AMOUNT_MIN = 10_000            # smaller sums are too common to mean anything
 APP_TEXT = {"opening balance", "balance reconciliation", "balance reconciliation (1.0 upgrade)",
             "balance adjustment"}
 IGNORE_FILE = ROOT / ".privacy-ignore"
+# The built app (dist/) is mostly third-party files - library licences with their
+# authors' e-mails, colour-map numbers - so it isn't pattern-matched. Instead every
+# file in it, binaries included, is searched for *your* identifiers, and nothing an
+# app writes beside itself (data/, logs/) may be there at all.
+BUNDLE = "dist/"
+APP_OUTPUT = re.compile(r"^dist/[^/]+/(data|logs)/")
 ALLOWED_EMAILS = {"noreply@anthropic.com"}
 PATTERNS = {
     "e-mail address": re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}"),
@@ -121,6 +127,22 @@ def collect(store: Path) -> dict[str, str]:
     return values
 
 
+def own_identifiers() -> list[bytes]:
+    """Your user-folder name and the e-mail addresses on this repo's commits."""
+    ids = {Path.home().name}
+    out = subprocess.run(["git", "log", "--all", "--format=%ae"], cwd=ROOT,
+                         capture_output=True, text=True)
+    ids |= {e for e in out.stdout.split() if "noreply" not in e}
+    return [i.lower().encode() for i in ids if len(i) >= 4]
+
+
+def scan_bundle_file(label: str, data: bytes, ids: list[bytes], hits: list) -> None:
+    low = data.lower()
+    for ident in ids:
+        if ident in low:
+            hits.append((label, 0, f"your identifier '{ident.decode()}' is inside the built app"))
+
+
 def publishable_files() -> list[Path]:
     out = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
                          cwd=ROOT, capture_output=True, check=True)
@@ -169,18 +191,33 @@ def main() -> int:
 
     hits: list = []
     me = Path(__file__).resolve()
-    skipped = 0
+    skipped = bundled = 0
+    ids = own_identifiers()
     for path in files:
         if path.resolve() == me:
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        if APP_OUTPUT.match(rel):
+            hits.append((rel, 0, "files an app wrote beside its .exe (data/, logs/) must never be published"))
+            continue
+        if rel.startswith(BUNDLE):
+            bundled += 1
+            try:
+                scan_bundle_file(rel, path.read_bytes(), ids, hits)
+            except OSError:
+                pass
             continue
         text = _text(path)
         if text is None:
             skipped += 1
             continue
         scan_text(str(path.relative_to(ROOT)), text, values, hits)
-    print(f"Scanned {len(files) - skipped} text files git would publish "
+    print(f"Scanned {len(files) - skipped - bundled} text files git would publish "
           f"({skipped} binary files such as screenshots not inspected) "
           f"against {len(values)} values from {store}.")
+    if bundled:
+        print(f"Searched all {bundled} files of the built app in {BUNDLE} (binaries too) for "
+              f"your identifiers ({len(ids)}: user-folder name, commit e-mails).")
 
     if args.history:
         log = subprocess.run(["git", "log", "--all", "-p", "--no-color", "--format=commit %h"],
@@ -197,7 +234,13 @@ def main() -> int:
         for (c, path), lines in added.items():
             if path.endswith("privacy_scan.py"):
                 continue
-            scan_text(f"history {c}:{path}", "\n".join(lines), values, hits)
+            label = f"history {c}:{path}"
+            if APP_OUTPUT.match(path):
+                hits.append((label, 0, "files an app wrote beside its .exe were committed"))
+            elif path.startswith(BUNDLE):
+                scan_bundle_file(label, "\n".join(lines).encode("utf-8", "replace"), ids, hits)
+            else:
+                scan_text(label, "\n".join(lines), values, hits)
 
     if not hits:
         print("Nothing personal found.")

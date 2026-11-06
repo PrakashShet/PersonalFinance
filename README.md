@@ -7,6 +7,7 @@ plain JSON files you can read in any text editor, now or in twenty years.
 
 ![Dashboard: net worth, this month, what needs attention, and the trend](docs/user-guide/images/01-dashboard.png)
 
+**[Download for Windows](#download-for-windows)** ·
 **[User guide](docs/user-guide/README.md)** · [Changelog](CHANGELOG.md) ·
 [MIT license](LICENSE)
 
@@ -44,7 +45,24 @@ plain JSON files you can read in any text editor, now or in twenty years.
 
 ![Budgets: limits per category, what is left, and the last six months](docs/user-guide/images/04-budgets.png)
 
-## Install and run
+## Download for Windows
+
+A ready-to-run build of version 1.1.0 is in
+[`dist/PersonalFinanceManager`](dist/PersonalFinanceManager). It needs no
+installation and no Python, and runs on Windows 10 or 11 (64-bit).
+
+1. On this page, click **Code → Download ZIP** and unzip it, or `git clone` the
+   repository.
+2. Open `dist\PersonalFinanceManager` and run **PersonalFinanceManager.exe**.
+   Keep the folder together, because the app needs the `_internal` folder beside
+   it. You can move the whole folder anywhere you like.
+
+- **Your data** is kept in `%APPDATA%\PersonalFinanceManager`, never in the app
+  folder, so replacing the app with a newer version leaves your data alone.
+- **Windows SmartScreen** may say *Windows protected your PC*, because the app
+  isn't code-signed. Choose **More info → Run anyway**.
+
+## Run from source
 
 **Windows.** Install [Python 3.10+](https://www.python.org/downloads/) and tick
 *Add python.exe to PATH*. Then, in this folder:

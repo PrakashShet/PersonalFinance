@@ -283,6 +283,10 @@ The repo is MIT-licensed and safe to push **only because personal data stays out
 - Never put real figures, names or paths from the user's data into code, tests, docs or
   commit messages - not even as an example. Use the demo household instead.
 - Images in the repo come from `tools/make_user_guide.py` (demo data) only.
+- The built app is committed in `dist/PersonalFinanceManager/` (the `.exe` and `_internal`)
+  so people can run it without Python. `.gitignore` admits only that folder and never the
+  `data/` or `logs/` an old build keeps beside its `.exe`. Rebuild (`run_build_exe.bat`) and
+  commit it for each release, from the tagged commit.
 - Before any push run `python tools/privacy_scan.py --history` - the **release** skill.
 
 ## Working agreements

@@ -1,0 +1,16 @@
+{
+  "regime": "new",
+  "fy": "2025-26",
+  "slabs": [
+    {"from": 0,        "to": 400000,  "rate": 0.00},
+    {"from": 400000,   "to": 800000,  "rate": 0.05},
+    {"from": 800000,   "to": 1200000, "rate": 0.10},
+    {"from": 1200000,  "to": 1600000, "rate": 0.15},
+    {"from": 1600000,  "to": 2000000, "rate": 0.20},
+    {"from": 2000000,  "to": 2400000, "rate": 0.25},
+    {"from": 2400000,  "to": null,    "rate": 0.30}
+  ],
+  "standard_deduction": 75000,
+  "cess": 0.04,
+  "note": "Always verify slabs against the latest Finance Act before relying on these numbers."
+}

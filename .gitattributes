@@ -8,3 +8,9 @@
 *.png binary
 *.ico binary
 *.jpg binary
+*.exe binary
+*.dll binary
+*.pyd binary
+
+# The built app is stored byte for byte, exactly as PyInstaller made it.
+dist/** -text

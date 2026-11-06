@@ -38,7 +38,9 @@ Verified this pass, by running things - not asserted:
 - **Scale:** a synthetic 30-year store (35,000 transactions, 6,000 snapshots) opens in
   0.3 s, builds its window in 0.3 s, refreshes any page in under 0.1 s, shows *All
   time* in 0.7 s, switches theme in 0.6 s and saves a change in 0.4 s.
-- **The `.exe`:** built with the project's spec (into a scratch folder) and launched
+- **The `.exe`:** built with `run_build_exe.bat`, launched off-screen with a throwaway data
+  folder, and committed in `dist/PersonalFinanceManager/` (306 files, the app only).
+  Earlier it was also built into a scratch folder and launched
   off-screen with throwaway data folders: first start, relaunch after a hard kill,
   import of data kept beside an old build, killed before its first save, and a store
   left with no categories by the old bug (it heals). The build script's set-aside of

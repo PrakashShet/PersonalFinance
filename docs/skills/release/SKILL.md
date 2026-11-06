@@ -33,6 +33,11 @@ in `STATUS.md`, a path with your user name. Remove those, then scan again.
 
 - **Images are not scanned.** Every committed image must come from
   `tools/make_user_guide.py`, which uses the fictional demo store.
+- **The built app (`dist/`) is checked differently.** Its third-party files contain
+  other people's public e-mails and numbers (library licences, colour maps), so they
+  aren't pattern-matched. Instead every file in it, binaries included, is searched for
+  *your* identifiers: your user-folder name and the e-mails on this repo's commits.
+  Anything an app wrote beside its `.exe` (`data/`, `logs/`) is always a finding.
 - **Already committed something personal?** Deleting it in a new commit leaves it
   in history. Don't push. Rewrite the unpushed history first, for example by
   re-committing from a clean tree on a new orphan branch.
@@ -57,7 +62,24 @@ in `STATUS.md`, a path with your user name. Remove those, then scan again.
 - If you will attach an `.exe` to the release: run `run_build_exe.bat`, then open
   the built app once.
 
-## 4. Commit and push
+## 4. The built app
+
+The ready-to-run Windows app is committed in `dist/PersonalFinanceManager/`, so people can
+download it without Python. For each release:
+
+1. `run_build_exe.bat` (it sets aside and restores any old data beside the `.exe`).
+2. Launch it once, ideally with `PFM_HOME` set to a throwaway folder.
+3. `git status dist` must list only `dist/PersonalFinanceManager/PersonalFinanceManager.exe`
+   and files under `_internal/`, never `data/` or `logs/`. The ignore rules allow only
+   that, and re-include `*.pyd` (the Qt modules), which `*.py[cod]` would otherwise drop.
+4. Commit it with the release.
+
+Size limits: a `git push` accepts files up to 100 MB (the largest app file is about
+20 MB). GitHub's website accepts uploads up to 25 MB. A Release asset can be up to 2 GB,
+but only through the *Attach binaries* box; a file dropped into the description box
+hits the 25 MB limit.
+
+## 5. Commit and push
 
 ```bat
 git status                         :: nothing from data\, logs\, shots\, .venv\ or dist\

@@ -79,6 +79,8 @@ automatically, after a backup, the first time a new version opens it.
 - `tools/privacy_scan.py` checks that none of your data is in the repository before
   you push.
 - Released under the MIT license.
+- A ready-to-run Windows build is included in `dist/PersonalFinanceManager`: download
+  the repository, unzip it and run `PersonalFinanceManager.exe`. No Python needed.
 
 ## 1.0.0 - 2026-11-06
 
