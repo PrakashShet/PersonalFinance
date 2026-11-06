@@ -77,12 +77,15 @@ class YearPoint:
     net_income: float                # annual (take-home)
     expenses: float                  # annual
     emi_outflow: float               # annual
-    savings: float                   # annual (net_income − expenses − emi)
+    savings: float                   # annual net_income - expenses - emi; NEGATIVE = deficit
     contributions: float             # annual amount fed into the portfolio
     portfolio_value: float
     liabilities_outstanding: float
     net_worth_nominal: float
     net_worth_real: float            # in today's rupees
+    withdrawals: float = 0.0         # deficit paid from cash + portfolio this year
+    shortfall: float = 0.0           # deficit nothing was left to pay for
+    cash: float = 0.0                # cash & bank at year end
 
 
 @dataclass
@@ -176,18 +179,18 @@ class ProjectionService:
         gross_income = sum(income_svc.gross_monthly(s) for s in sources if s.is_active)
         net_income = sum(income_svc.net_monthly(s) for s in sources if s.is_active)
 
-        # Recent monthly expense average from the ledger
+        # Recent monthly expense average from the ledger. EMIs logged from the
+        # Dashboard (tagged "emi:") are excluded - loan payments are projected
+        # separately from the amortisation schedule, and counting them in both
+        # places would double the outflow.
         today = date.today()
         totals = []
         for i in range(months_for_expense_avg):
-            y = today.year if today.month - i > 0 else today.year - 1
-            m = today.month - i if today.month - i > 0 else 12 + (today.month - i)
-            try:
-                s = txn_service.summary(year=str(y), month=f"{m:02d}")
-                if s.get("expense", 0.0) > 0:
-                    totals.append(s["expense"])
-            except Exception:
-                pass
+            month_index = today.year * 12 + (today.month - 1) - i
+            y, m = divmod(month_index, 12)
+            expense = txn_service.monthly_expense(str(y), f"{m + 1:02d}", exclude_emi=True)
+            if expense > 0:
+                totals.append(expense)
         avg_expense = sum(totals) / len(totals) if totals else 0.0
 
         return Baseline(
@@ -210,13 +213,26 @@ class ProjectionService:
         assumptions: Assumptions,
         stress: Optional[Stress] = None,
     ) -> list[YearPoint]:
+        """Year-by-year cashflow and net worth.
+
+        Each year: surplus (take-home - expenses - EMIs) is invested; a
+        **deficit is paid from cash first, then by selling from the
+        portfolio**. Once both are exhausted the unpaid part is reported as
+        ``shortfall`` - see :meth:`depletion_age`. The portfolio grows at
+        ``expected_return`` before retirement and ``post_retire_return`` after
+        (both reduced by a stress ``return_drop``).
+
+        Before 1.0 a deficit was floored at zero, so retirement and job-loss
+        years never touched the portfolio and it compounded untouched forever.
+        """
         a = assumptions
-        eq_return = a.expected_return - (stress.return_drop if stress else 0.0)
+        drop = stress.return_drop if stress else 0.0
         income_shock = stress.income_shock_years if stress else 0
         expense_spike = (stress.expense_spike if stress else 0.0)
 
         years = max(1, a.horizon_years)
         portfolio = baseline.portfolio_value
+        cash = max(0.0, baseline.cash_and_bank)
         # Build a yearly liability-outstanding series via amortization
         liab_series = self._aggregate_liability_balances(baseline.active_liabilities, years)
         emi_series = self._aggregate_emi_outflow(baseline.active_liabilities, years)
@@ -240,14 +256,29 @@ class ProjectionService:
 
             expenses = base_expenses_annual * growth_exp
             emi_y = emi_series[y] if y < len(emi_series) else 0.0
-            savings = max(0.0, net - expenses - emi_y)
-            contributions = savings  # all savings invested for simplicity
+            savings = net - expenses - emi_y
 
-            # Grow last year's portfolio, then add this year's contributions
+            contributions = withdrawals = shortfall = 0.0
+            # Year 0 is today: report the cashflow, move no money.
             if y > 0:
-                portfolio = portfolio * (1 + eq_return) + contributions
+                rate = (a.post_retire_return if retired else a.expected_return) - drop
+                portfolio = portfolio * (1 + rate)
+                if savings >= 0:
+                    contributions = savings
+                    portfolio += contributions
+                else:
+                    need = -savings
+                    from_cash = min(cash, need)
+                    cash -= from_cash
+                    need -= from_cash
+                    from_portfolio = min(portfolio, need)
+                    portfolio -= from_portfolio
+                    need -= from_portfolio
+                    withdrawals = from_cash + from_portfolio
+                    shortfall = need
+
             liab_out = liab_series[y] if y < len(liab_series) else 0.0
-            net_worth = portfolio + baseline.cash_and_bank - liab_out
+            net_worth = portfolio + cash - liab_out
             real = net_worth / ((1 + a.inflation) ** y) if y else net_worth
 
             out.append(YearPoint(
@@ -258,8 +289,17 @@ class ProjectionService:
                 portfolio_value=portfolio,
                 liabilities_outstanding=liab_out,
                 net_worth_nominal=net_worth, net_worth_real=real,
+                withdrawals=withdrawals, shortfall=shortfall, cash=cash,
             ))
         return out
+
+    @staticmethod
+    def depletion_age(points: list[YearPoint]) -> Optional[int]:
+        """First age at which expenses can no longer be paid, or None."""
+        for p in points:
+            if p.shortfall > 0.5:
+                return p.age
+        return None
 
     # ── retirement plan ───────────────────────────────────────────────────
     def retirement_plan(

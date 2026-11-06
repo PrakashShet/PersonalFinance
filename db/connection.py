@@ -22,13 +22,22 @@ class Database:
             raise RuntimeError("Database not connected. Call db.connect() first.")
         return self._conn
 
-    def connect(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+    @property
+    def is_connected(self) -> bool:
+        return self._conn is not None
+
+    def connect(self, path: Path | str) -> None:
+        """Open a database file, or an in-memory scratch DB for ``":memory:"``."""
+        target = str(path)
+        in_memory = target == ":memory:"
+        if not in_memory:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(target, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON;")
-        self._conn.execute("PRAGMA journal_mode = WAL;")
-        log.info(f"Connected to SQLite at {path}")
+        if not in_memory:
+            self._conn.execute("PRAGMA journal_mode = WAL;")
+        log.info("Connected to SQLite %s", "in memory" if in_memory else f"at {path}")
 
     def apply_schema(self, schema_path: Path) -> None:
         sql = schema_path.read_text(encoding="utf-8")

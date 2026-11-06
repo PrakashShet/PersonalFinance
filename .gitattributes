@@ -1,0 +1,10 @@
+# Normalise line endings in the repository; check out in the platform's style.
+* text=auto
+
+# cmd.exe needs CRLF in batch files, whatever platform the repo is cloned on.
+*.bat text eol=crlf
+
+# Never touch binary files.
+*.png binary
+*.ico binary
+*.jpg binary

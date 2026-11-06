@@ -29,6 +29,7 @@ from PyQt6.QtCore import Qt
 from models.goal import Goal
 from utils.form_validation import validation_error
 from utils.formatters import fmt_inr
+from ui.widgets.common import style_button_box
 
 
 STATUSES = [
@@ -181,10 +182,11 @@ class GoalDialog(QDialog):
         root.addWidget(notes_group)
 
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
+        style_button_box(buttons)
         root.addWidget(buttons)
 
     # ------------------------------------------------------------------

@@ -24,6 +24,8 @@ class Field:
     options: tuple = ()      # for combo: tuple of (value, label)
     required: bool = False
     placeholder: str = ""
+    in_form: bool = True     # False: shown in details, never edited directly
+    hint: str = ""
 
 
 @dataclass(frozen=True)
@@ -65,9 +67,11 @@ SECTIONS: tuple = (
         Field("account_type", "Type", "combo", "TEXT", _ACCOUNT_TYPES, required=True),
         Field("institution", "Institution", "text", "TEXT", placeholder="e.g. HDFC Bank"),
         Field("account_number", "Account number", "text", "TEXT", placeholder="e.g. XXXX1234"),
-        Field("currency", "Currency", "combo", "TEXT", _CURRENCIES),
-        Field("opening_balance", "Opening balance", "money", "REAL"),
-        Field("current_balance", "Current balance", "money", "REAL"),
+        Field("currency", "Currency", "combo", "TEXT", _CURRENCIES, required=True),
+        Field("opening_balance", "Opening balance", "money", "REAL", in_form=False),
+        Field("current_balance", "Balance today", "money", "REAL",
+              hint="Changing this records a balance adjustment in Transactions, "
+                   "so your history stays correct."),
     )),
     Section("kyc", "Contact & KYC", (
         Field("phone", "Phone", "text", "TEXT", placeholder="Registered mobile"),

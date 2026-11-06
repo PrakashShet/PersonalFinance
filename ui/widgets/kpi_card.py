@@ -1,27 +1,53 @@
-"""Reusable KPI card for dashboard."""
+"""KPI card: label, value, optional hint (e.g. a change vs last month)."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from typing import Optional
+
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout
+
+from ui.theme import icons, theme
+from ui.widgets.common import set_tone
 
 
 class KpiCard(QFrame):
-    def __init__(self, title: str, value: str) -> None:
-        super().__init__()
+    def __init__(self, title: str, value: str = "-", hint: str = "",
+                 icon_name: Optional[str] = None, parent=None) -> None:
+        super().__init__(parent)
         self.setObjectName("kpiCard")
-        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(4)
 
-        layout = QVBoxLayout(self)
+        head = QHBoxLayout()
+        head.setSpacing(6)
+        self._icon_name = icon_name
+        self._icon = QLabel()
+        self._icon.setVisible(bool(icon_name))
+        head.addWidget(self._icon)
         self.title_label = QLabel(title)
-        self.title_label.setObjectName("kpiTitle")
-        self.title_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.title_label.setObjectName("kpiLabel")
+        head.addWidget(self.title_label, 1)
+        root.addLayout(head)
 
         self.value_label = QLabel(value)
         self.value_label.setObjectName("kpiValue")
-        self.value_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        root.addWidget(self.value_label)
 
-        layout.addWidget(self.title_label)
-        layout.addWidget(self.value_label)
+        self.hint_label = QLabel(hint or " ")
+        self.hint_label.setObjectName("kpiHint")
+        root.addWidget(self.hint_label)
+        self._paint_icon()
+        theme.changed.connect(self._paint_icon)
 
-    def set_value(self, value: str) -> None:
+    def _paint_icon(self) -> None:
+        if self._icon_name:
+            self._icon.setPixmap(icons.pixmap(self._icon_name, theme.color("text_muted"), 15))
+
+    def set_value(self, value: str, tone: Optional[str] = None) -> None:
         self.value_label.setText(value)
+        set_tone(self.value_label, tone)
+
+    def set_hint(self, text: str, tone: Optional[str] = None) -> None:
+        self.hint_label.setText(text or " ")
+        set_tone(self.hint_label, tone)

@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 from config.constants import LiabilityType
 from models.liability import Liability
 from utils.calculators import emi as calc_emi
+from ui.widgets.common import style_button_box
 
 
 LIABILITY_TYPES: list[tuple[str, str]] = [
@@ -138,7 +139,7 @@ class LiabilityDialog(QDialog):
 
         # EMI auto-calc preview
         self._emi_preview = QLabel("Calculated EMI: --")
-        self._emi_preview.setStyleSheet("color: #6b7280; font-size: 11px;")
+        self._emi_preview.setObjectName("fieldHint")
         lg.addRow("", self._emi_preview)
 
         self.tenure_spin = QSpinBox()
@@ -182,10 +183,11 @@ class LiabilityDialog(QDialog):
         root.addWidget(scroll)
 
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
+        style_button_box(buttons)
         root.addWidget(buttons)
 
         # Signals

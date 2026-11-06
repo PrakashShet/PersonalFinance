@@ -26,6 +26,7 @@ from PyQt6.QtCore import QDate
 
 from models.holding import Holding
 from config.constants import HoldingType
+from ui.widgets.common import style_button_box
 
 
 # ── option lists ────────────────────────────────────────────────────────────
@@ -83,9 +84,11 @@ class HoldingDialog(QDialog):
         parent: Optional[QWidget] = None,
         holding: Optional[Holding] = None,
         accounts: Optional[list] = None,   # list of (id, name)
+        stock_lookup=None,                 # callable(symbol) -> dict | None
     ) -> None:
         super().__init__(parent)
         self._holding = holding
+        self._stock_lookup = stock_lookup
         self._accounts = accounts or []
         self._editing = holding is not None
         self.setWindowTitle("Edit Holding" if self._editing else "Add Holding")
@@ -164,6 +167,11 @@ class HoldingDialog(QDialog):
         self.symbol_edit = QLineEdit()
         self.symbol_edit.setPlaceholderText("RELIANCE, NIFTYBEES …")
         sg.addRow("Symbol", self.symbol_edit)
+        self.symbol_hint = QLabel("")
+        self.symbol_hint.setObjectName("fieldHint")
+        self.symbol_hint.setVisible(False)
+        sg.addRow("", self.symbol_hint)
+        self.symbol_edit.editingFinished.connect(self._on_symbol_entered)
 
         self.exchange_combo = QComboBox()
         for ex in EXCHANGES:
@@ -293,10 +301,11 @@ class HoldingDialog(QDialog):
 
         # ── Buttons ──────────────────────────────────────────────────────
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
+        style_button_box(buttons)
         root.addWidget(buttons)
 
         # Signals
@@ -313,6 +322,28 @@ class HoldingDialog(QDialog):
     # ------------------------------------------------------------------
     # Type visibility
     # ------------------------------------------------------------------
+
+    def _on_symbol_entered(self) -> None:
+        """Fill market cap / sector / exchange from the bundled stock master."""
+        if self._stock_lookup is None:
+            return
+        info = self._stock_lookup(self.symbol_edit.text().strip())
+        if not info:
+            self.symbol_hint.setVisible(False)
+            return
+        self.symbol_edit.setText(str(info.get("symbol") or "").upper())
+        if not self.name_edit.text().strip() and info.get("name"):
+            self.name_edit.setText(info["name"])
+        idx = self.exchange_combo.findText(info.get("exchange") or "")
+        if idx >= 0:
+            self.exchange_combo.setCurrentIndex(idx)
+        cap = self.cap_combo.findData(info.get("market_cap") or "")
+        if cap >= 0:
+            self.cap_combo.setCurrentIndex(cap)
+        if info.get("sector") and not self.sector_edit.text().strip():
+            self.sector_edit.setText(info["sector"])
+        self.symbol_hint.setText(f"Found {info.get('name') or info.get('symbol')} - details filled in")
+        self.symbol_hint.setVisible(True)
 
     def _on_type_changed(self) -> None:
         t = self.type_combo.currentData()

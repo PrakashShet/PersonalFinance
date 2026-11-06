@@ -6,7 +6,6 @@
   {"name": "Dividend",      "kind": "income",  "icon": "coins"},
   {"name": "Interest",      "kind": "income",  "icon": "percent"},
   {"name": "Rental",        "kind": "income",  "icon": "home"},
-  {"name": "Opening Balance", "kind": "income", "icon": "landmark"},
 
   {"name": "Food & Dining", "kind": "expense", "icon": "utensils"},
   {"name": "Groceries",     "kind": "expense", "icon": "shopping-cart"},

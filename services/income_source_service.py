@@ -1,7 +1,7 @@
 """CRUD for income sources; monthly entries delegate to IncomeService."""
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable
 
 from models.income import IncomeSource
 from models.income_entry import IncomeEntry
@@ -24,6 +24,11 @@ class IncomeSourceService:
         self._on_change = on_change
 
     def list_active(self) -> list[IncomeSource]:
+        return self._source_repo.list_active()
+
+    def list_all(self, include_inactive: bool = False) -> list[IncomeSource]:
+        if include_inactive:
+            return self._source_repo.list_all("1 = 1 ORDER BY is_active DESC, id")
         return self._source_repo.list_active()
 
     def get(self, source_id: int) -> IncomeSource | None:

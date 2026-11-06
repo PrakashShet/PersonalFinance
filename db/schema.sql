@@ -79,8 +79,8 @@ CREATE TABLE IF NOT EXISTS categories (
 CREATE TABLE IF NOT EXISTS transactions (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     txn_date       TEXT NOT NULL,
-    txn_type       TEXT NOT NULL,    -- income | expense | transfer | investment_buy | investment_sell
-    amount         REAL NOT NULL,
+    txn_type       TEXT NOT NULL,    -- income | expense | transfer | investment_buy | investment_sell | adjustment
+    amount         REAL NOT NULL,    -- always > 0, except `adjustment` which is signed (+ adds, - removes)
     account_id     INTEGER NOT NULL,
     counter_account_id INTEGER,      -- for transfers
     category_id    INTEGER,
@@ -257,6 +257,24 @@ CREATE TABLE IF NOT EXISTS goal_holdings (
 );
 
 -- =========================================================================
+-- BUDGETS  (spending limit for one expense category, per month or per year)
+-- Spending = `expense` transactions in that category during the period,
+-- converted to rupees with fx_rates. A yearly period starts in the month set
+-- by the `budget_year_start` preference (1 = January, 4 = April / Indian FY).
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS budgets (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_id  INTEGER NOT NULL,
+    period       TEXT NOT NULL DEFAULT 'monthly',   -- monthly | yearly
+    amount       REAL NOT NULL,                     -- the limit, in rupees per period
+    notes        TEXT,
+    created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE,
+    UNIQUE (category_id, period)
+);
+
+-- =========================================================================
 -- NET WORTH SNAPSHOTS  (monthly, for trend charts)
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS net_worth_snapshots (
@@ -291,6 +309,29 @@ CREATE TABLE IF NOT EXISTS reference_data (
     key       TEXT PRIMARY KEY,
     value_json TEXT NOT NULL,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================================
+-- FX RATES  (user-maintained; converts non-INR account balances into INR)
+-- Stored in data/store/fx_rates.json like any other user record.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS fx_rates (
+    currency    TEXT PRIMARY KEY,          -- ISO code, e.g. USD
+    rate_to_inr REAL NOT NULL,             -- 1 unit of `currency` = this many rupees
+    as_of       TEXT,                      -- YYYY-MM-DD the rate was entered
+    updated_at  TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================================
+-- STOCK MASTER  (reference: shipped in data/seed/stock_master.csv)
+-- Used to auto-fill market cap / sector when a stock symbol is entered.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS stock_master (
+    symbol      TEXT PRIMARY KEY,
+    name        TEXT,
+    exchange    TEXT,
+    market_cap  TEXT,                      -- sme | small_cap | mid_cap | large_cap
+    sector      TEXT
 );
 
 -- ==========================================================

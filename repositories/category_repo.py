@@ -23,6 +23,12 @@ class CategoryRepository:
     def name_map(self) -> dict:
         return {r["id"]: r["name"] for r in self.list_all()}
 
+    def get(self, category_id: int):
+        """Row (id, name, kind) or None."""
+        return self.db.fetch_one(
+            "SELECT id, name, kind FROM categories WHERE id = ?", (category_id,)
+        )
+
     def get_id_by_name(self, name: str, kind: str) -> int | None:
         row = self.db.fetch_one(
             "SELECT id FROM categories WHERE name = ? AND kind = ?",

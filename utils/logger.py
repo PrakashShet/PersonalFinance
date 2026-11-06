@@ -1,15 +1,16 @@
-"""Centralized logger. Writes to logs/app.log and stdout."""
+"""Centralized logger. Writes to ``settings.LOG_FILE`` (rotating) and stdout.
+
+The log location comes from ``config.settings`` so a packaged build logs to
+``%APPDATA%\\PersonalFinanceManager\\logs`` instead of PyInstaller's temporary
+extraction folder, and tests (``PFM_HOME`` set) never write to the real log.
+"""
 from __future__ import annotations
 
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_LOG_DIR = _PROJECT_ROOT / "logs"
-_LOG_DIR.mkdir(parents=True, exist_ok=True)
-_LOG_FILE = _LOG_DIR / "app.log"
+from config.settings import settings
 
 _FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
 
@@ -23,13 +24,22 @@ def _configure() -> None:
     root = logging.getLogger()
     root.setLevel(logging.INFO)
 
-    stream = logging.StreamHandler(sys.stdout)
-    stream.setFormatter(logging.Formatter(_FORMAT))
-    root.addHandler(stream)
+    # A windowed .exe has no console: sys.stdout is None there.
+    if sys.stdout is not None:
+        stream = logging.StreamHandler(sys.stdout)
+        stream.setFormatter(logging.Formatter(_FORMAT))
+        root.addHandler(stream)
 
-    file_h = RotatingFileHandler(_LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
-    file_h.setFormatter(logging.Formatter(_FORMAT))
-    root.addHandler(file_h)
+    try:
+        settings.LOG_DIR.mkdir(parents=True, exist_ok=True)
+        file_h = RotatingFileHandler(
+            settings.LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8"
+        )
+        file_h.setFormatter(logging.Formatter(_FORMAT))
+        root.addHandler(file_h)
+    except OSError:
+        # Logging must never stop the app from starting.
+        pass
 
     _configured = True
 

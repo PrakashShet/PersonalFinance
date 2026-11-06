@@ -6,10 +6,13 @@ from __future__ import annotations
 from models.goal import Goal
 from models.liability import Liability
 from repositories.goal_holding_repo import GoalHoldingRepository
+import math
+
 from services.projection_service import (
     Assumptions,
     Baseline,
     ProjectionService,
+    Stress,
 )
 
 
@@ -115,3 +118,48 @@ def test_goal_forecasts(temp_db):
     assert forecast.target == 1_000_000.0
     assert forecast.required_sip > 0
     assert forecast.estimated_current_sip == 0.0
+
+
+# --- drawdown: deficits are paid from cash, then the portfolio ---------------
+
+def test_retiree_spends_down_portfolio_and_runs_out():
+    """Rs 1 Cr, Rs 12 L/yr expenses growing 6%, no income: must deplete.
+    Before the fix the portfolio compounded to ~Rs 10.8 Cr by 85."""
+    svc = ProjectionService()
+    baseline = _baseline(portfolio_value=10_000_000.0, cash_and_bank=0.0,
+                         monthly_net_income=0.0, monthly_gross_income=0.0,
+                         monthly_expenses=100_000.0, net_worth=10_000_000.0)
+    a = Assumptions(current_age=60, retirement_age=60, horizon_years=25,
+                    expected_return=0.10, post_retire_return=0.07)
+    points = svc.project_long_term(baseline, a)
+
+    assert points[-1].portfolio_value == 0.0
+    age = svc.depletion_age(points)
+    assert age is not None and 65 <= age <= 75
+    assert all(p.contributions == 0.0 for p in points)
+    assert any(p.withdrawals > 0 for p in points)
+    # Year 1 grows at the post-retirement rate, then pays the year's deficit.
+    expected_y1 = 10_000_000.0 * 1.07 - 1_200_000.0 * 1.06
+    assert math.isclose(points[1].portfolio_value, expected_y1, rel_tol=1e-9)
+
+
+def test_income_shock_draws_cash_before_portfolio():
+    svc = ProjectionService()
+    baseline = _baseline(cash_and_bank=600_000.0, monthly_expenses=40_000.0)
+    a = Assumptions(current_age=30, retirement_age=60, horizon_years=3)
+    shocked = svc.project_long_term(baseline, a, Stress(return_drop=0.0, income_shock_years=2))
+
+    y1 = shocked[1]
+    assert y1.net_income == 0.0
+    assert y1.savings < 0
+    assert y1.withdrawals > 0
+    assert y1.cash < baseline.cash_and_bank          # cash spent first
+    assert y1.portfolio_value == baseline.portfolio_value * 1.10
+
+
+def test_working_years_still_accumulate():
+    svc = ProjectionService()
+    points = svc.project_long_term(_baseline(), Assumptions(current_age=30, horizon_years=5))
+    assert all(p.shortfall == 0 for p in points)
+    assert points[-1].portfolio_value > points[0].portfolio_value
+    assert svc.depletion_age(points) is None

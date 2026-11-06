@@ -1,11 +1,18 @@
 """Shared pytest fixtures for Personal Finance Manager."""
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
-import pytest
+# Point the app's home (data, backups, preferences, logs) at a throwaway folder
+# BEFORE anything imports config.settings, so no test can touch real data.
+os.environ["PFM_HOME"] = tempfile.mkdtemp(prefix="pfm-test-home-")
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from config.settings import settings
+import pytest  # noqa: E402
+
+from config.settings import settings  # noqa: E402
 from db.connection import Database
 from db.migrate import run_migrations
 from services.data_loader import STORE_LOAD_ORDER, DataLoader

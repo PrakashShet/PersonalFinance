@@ -45,20 +45,14 @@ if not exist "%EXE%" (
     endlocal & exit /b 1
 )
 
-REM Ensure writable data folders exist beside the .exe
-if not exist "%OUTDIR%\data\store" mkdir "%OUTDIR%\data\store"
-if not exist "%OUTDIR%\data\cache" mkdir "%OUTDIR%\data\cache"
-if not exist "%OUTDIR%\data\user\backups" mkdir "%OUTDIR%\data\user\backups"
-if not exist "%OUTDIR%\logs" mkdir "%OUTDIR%\logs"
-
 echo.
 echo [SUCCESS] Build complete.
 echo.
 echo   Run:  "%EXE%"
 echo.
-echo   User data is stored next to the .exe:
-echo     %OUTDIR%\data\store\
-echo     %OUTDIR%\logs\
+echo   Your data is NOT stored beside the .exe (rebuilding replaces this folder).
+echo   It lives in:  %%APPDATA%%\PersonalFinanceManager\data\store
+echo   Data from an older build kept beside the .exe is copied there on first run.
 echo.
 echo   Copy the whole folder "dist\PersonalFinanceManager" to distribute the app.
 echo.

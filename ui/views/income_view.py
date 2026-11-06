@@ -1,12 +1,7 @@
-"""Income tab — master/detail.
+"""Income - where money comes from, and what actually arrived each month.
 
-Left:  list of income sources (name, type, deposit account, net/month, status).
-Right: detail for the selected source — salary breakdown (for salary sources)
-       plus a per-source monthly history with controls to record / edit / delete
-       what was actually received each month.
-
-Recording a month optionally posts an income transaction into the linked
-deposit account so balances stay in sync (handled by IncomeService).
+Recording a month can post the income into its account in the same step, so
+balances stay in sync (IncomeService).
 """
 from __future__ import annotations
 
@@ -14,20 +9,11 @@ from datetime import date
 from typing import Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QAbstractItemView,
-    QFrame,
-    QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QHeaderView,
-    QLabel,
     QMessageBox,
-    QPushButton,
-    QScrollArea,
-    QSplitter,
-    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -35,634 +21,302 @@ from PyQt6.QtWidgets import (
 )
 
 from models.income import IncomeSource
-from models.income_entry import IncomeEntry
-from services.app_context import AppContext
 from services.income_service import IncomeService
-from ui.theme.badges import FALLBACK_BADGE, INCOME_SOURCE_BADGE
 from ui.dialogs.income_dialog import IncomeDialog
 from ui.dialogs.record_income_dialog import RecordIncomeDialog
-from ui.widgets.income_source_tile import IncomeSourceTile
+from ui.theme import theme
+from ui.theme.badges import FREQ_LABELS, INCOME_SOURCE_LABELS, label as type_label
+from ui.views.master_detail import MasterDetailView
+from ui.widgets.common import button, label
+from ui.widgets.detail_panel import DetailPanel
 from ui.widgets.kpi_card import KpiCard
+from ui.widgets.list_tile import ListTile
+from ui.widgets.toast import notify
 from utils.formatters import fmt_inr
 
-# ── label / colour maps ──────────────────────────────────────────────────────
-
-SOURCE_TYPE_LABELS: dict[str, str] = {
-    "salary":    "Salary",
-    "web_app":   "SaaS / Web App",
-    "trading":   "Trading P&L",
-    "rental":    "Rental",
-    "freelance": "Freelance",
-    "dividend":  "Dividend",
-    "interest":  "Interest",
-    "other":     "Other",
-}
-
-FREQ_LABELS: dict[str, str] = {
-    "monthly":   "Monthly",
-    "quarterly": "Quarterly",
-    "annual":    "Annual",
-    "irregular": "Irregular",
-    "one_time":  "One-time",
-}
-
-HISTORY_COLS = ["Month", "Expected", "Actual", "Variance", "Account", "Posted", "Notes"]
+HISTORY_COLS = ["Month", "Expected", "Received", "Difference", "Account", "In ledger"]
 
 
-# ── view ───────────────────────────────────────────────────────────────────
+def _month_label(period: str) -> str:
+    try:
+        return date.fromisoformat(f"{period}-01").strftime("%b %Y")
+    except ValueError:
+        return period
 
-class IncomeView(QWidget):
-    def __init__(self, ctx: AppContext) -> None:
-        super().__init__()
-        self.ctx = ctx
-        self._topics = {"income_sources", "income_entries", "accounts", "transactions"}
-        self._dirty = True
+
+class IncomeView(MasterDetailView):
+    title = "Income"
+    subtitle = "Salary and other income. Record each month to keep balances in sync."
+    add_label = "Add income source"
+    topics = frozenset({"income_sources", "income_entries", "accounts", "transactions"})
+    inactive_label = "Show inactive"
+    empty_icon = "income"
+    empty_title = "No income sources yet"
+    empty_text = "Add your salary or other income to track what arrives each month."
+    select_hint = "Select an income source to see its breakdown and monthly history."
+
+    def __init__(self, ctx) -> None:
         self._service = ctx.income_source_service
+        self.history_table: Optional[QTableWidget] = None
+        self._entries: list = []
+        super().__init__(ctx)
 
-        self._sources: list[IncomeSource] = []
-        self._entries: list[IncomeEntry] = []
-        self._accounts: list[tuple] = []
-        self._account_names: dict[int, str] = {}
-        self._selected_id: Optional[int] = None
-        self._tiles: list[IncomeSourceTile] = []
+    def build_kpis(self):
+        self.k_net = KpiCard("Expected take-home", icon_name="income")
+        self.k_received = KpiCard("Received this month", icon_name="check_circle")
+        self.k_gross = KpiCard("Gross per month", icon_name="coins")
+        self.k_deduct = KpiCard("Deductions per month", icon_name="scale")
+        return [self.k_net, self.k_received, self.k_gross, self.k_deduct]
 
-        self.ctx.events.changed.connect(self._on_data_changed)
-        self._build()
-        self.refresh()
+    def fetch(self, include_inactive: bool):
+        return self._service.list_all(include_inactive)
 
-    # -----------------------------------------------------------------------
-    # Build
-    # -----------------------------------------------------------------------
+    def refresh_kpis(self, items) -> None:
+        active = [s for s in items if s.is_active]
+        net = sum(self._service.net_monthly(s) for s in active)
+        received = self._service.total_received(date.today().strftime("%Y-%m"))
+        self.k_net.set_value(fmt_inr(net, compact=True))
+        self.k_net.set_hint(f"{len(active)} source{'s' if len(active) != 1 else ''} per month")
+        self.k_received.set_value(fmt_inr(received, compact=True))
+        if net > 0:
+            self.k_received.set_hint(f"{min(received / net, 9.99) * 100:.0f}% of expected")
+        self.k_gross.set_value(fmt_inr(sum(self._service.gross_monthly(s) for s in active), compact=True))
+        self.k_deduct.set_value(fmt_inr(sum(self._service.deductions_monthly(s) for s in active), compact=True))
 
-    def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(20, 16, 20, 16)
-        root.setSpacing(16)
+    def _month_status(self, s: IncomeSource) -> Optional[tuple[str, str]]:
+        if not s.is_active or not self._service.is_recurring_monthly(s):
+            return None
+        period = date.today().strftime("%Y-%m")
+        if self._service.has_logged(s.id, period):
+            return ("Recorded", "positive")
+        return ("Not recorded", "warning")
 
-        # ── header ──────────────────────────────────────────────────────────
-        header = QHBoxLayout()
-        title = QLabel("Income")
-        title.setObjectName("pageTitle")
-        header.addWidget(title)
-        header.addStretch()
-        self.add_btn = QPushButton("＋  Add Source")
-        self.add_btn.setObjectName("primaryBtn")
-        self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.add_btn.clicked.connect(self._on_add)
-        header.addWidget(self.add_btn)
-        root.addLayout(header)
-
-        # ── KPI row ─────────────────────────────────────────────────────────
-        kpi_row = QGridLayout()
-        kpi_row.setSpacing(12)
-        self.kpi_gross    = KpiCard("Gross Monthly",     "—")
-        self.kpi_net      = KpiCard("Net Take-Home",     "—")
-        self.kpi_deduct   = KpiCard("Deductions / Mo",   "—")
-        self.kpi_received = KpiCard("Received This Month", "—")
-        self.kpi_sources  = KpiCard("Active Sources",    "—")
-        for i, w in enumerate(
-            [self.kpi_gross, self.kpi_net, self.kpi_deduct, self.kpi_received, self.kpi_sources]
-        ):
-            kpi_row.addWidget(w, 0, i)
-        root.addLayout(kpi_row)
-
-        # ── splitter: sources (master) | detail ─────────────────────────────
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        splitter.addWidget(self._build_master())
-        splitter.addWidget(self._build_detail())
-        splitter.setSizes([520, 520])
-        root.addWidget(splitter, 1)
-
-    def _build_master(self) -> QWidget:
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-
-        # Scrollable list of source tiles
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.tile_container = QWidget()
-        self.tile_layout = QVBoxLayout(self.tile_container)
-        self.tile_layout.setContentsMargins(0, 4, 6, 4)
-        self.tile_layout.setSpacing(10)
-        self.tile_layout.addStretch(1)
-        self.scroll.setWidget(self.tile_container)
-        self.scroll.setMinimumHeight(240)
-        layout.addWidget(self.scroll, 1)
-
-        self.empty_label = QLabel('No income sources yet. Click "＋ Add Source" to create one.')
-        self.empty_label.setObjectName("tileFlags")
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setWordWrap(True)
-        self.empty_label.hide()
-        layout.addWidget(self.empty_label)
-
-        action_bar = QHBoxLayout()
-        self.edit_btn = QPushButton("✏  Edit")
-        self.edit_btn.setEnabled(False)
-        self.edit_btn.clicked.connect(self._on_edit)
-        self.toggle_btn = QPushButton("⏸  Deactivate")
-        self.toggle_btn.setEnabled(False)
-        self.toggle_btn.clicked.connect(self._on_toggle_active)
-        self.delete_btn = QPushButton("🗑  Delete")
-        self.delete_btn.setEnabled(False)
-        self.delete_btn.setObjectName("dangerBtn")
-        self.delete_btn.clicked.connect(self._on_delete)
-        action_bar.addWidget(self.edit_btn)
-        action_bar.addWidget(self.toggle_btn)
-        action_bar.addWidget(self.delete_btn)
-        action_bar.addStretch()
-        layout.addLayout(action_bar)
-        return container
-
-    def _build_detail(self) -> QWidget:
-        # Stacked: placeholder when nothing selected, detail otherwise.
-        self.detail_stack = QStackedWidget()
-
-        placeholder = QLabel("Select an income source to see details and monthly history.")
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder.setObjectName("tileFlags")
-        placeholder.setWordWrap(True)
-        self.detail_stack.addWidget(placeholder)
-
-        detail = QWidget()
-        d = QVBoxLayout(detail)
-        d.setContentsMargins(0, 0, 0, 0)
-        d.setSpacing(12)
-
-        self.detail_title = QLabel("—")
-        f = self.detail_title.font()
-        f.setBold(True)
-        f.setPointSize(f.pointSize() + 2)
-        self.detail_title.setFont(f)
-        d.addWidget(self.detail_title)
-
-        self.detail_subtitle = QLabel("")
-        self.detail_subtitle.setObjectName("tileFlags")
-        d.addWidget(self.detail_subtitle)
-
-        # Salary breakdown (shown only for salary sources)
-        self.breakdown_panel = _SalaryBreakdownPanel()
-        self.breakdown_panel.setVisible(False)
-        d.addWidget(self.breakdown_panel)
-
-        # Monthly history
-        hist_box = QGroupBox("Monthly History")
-        hist_layout = QVBoxLayout(hist_box)
-        hist_layout.setSpacing(6)
-
-        hist_actions = QHBoxLayout()
-        self.record_btn = QPushButton("＋  Record Income")
-        self.record_btn.setObjectName("primaryBtn")
-        self.record_btn.clicked.connect(self._on_record)
-        self.edit_entry_btn = QPushButton("✏  Edit")
-        self.edit_entry_btn.setEnabled(False)
-        self.edit_entry_btn.clicked.connect(self._on_edit_entry)
-        self.delete_entry_btn = QPushButton("🗑  Delete")
-        self.delete_entry_btn.setEnabled(False)
-        self.delete_entry_btn.setObjectName("dangerBtn")
-        self.delete_entry_btn.clicked.connect(self._on_delete_entry)
-        hist_actions.addWidget(self.record_btn)
-        hist_actions.addStretch()
-        hist_actions.addWidget(self.edit_entry_btn)
-        hist_actions.addWidget(self.delete_entry_btn)
-        hist_layout.addLayout(hist_actions)
-
-        self.history_table = QTableWidget()
-        self.history_table.setColumnCount(len(HISTORY_COLS))
-        self.history_table.setHorizontalHeaderLabels(HISTORY_COLS)
-        self.history_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.history_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.history_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.history_table.setAlternatingRowColors(True)
-        self.history_table.verticalHeader().setVisible(False)
-        self.history_table.horizontalHeader().setSectionResizeMode(
-            len(HISTORY_COLS) - 1, QHeaderView.ResizeMode.Stretch
+    def make_tile(self, s: IncomeSource, selected: bool) -> ListTile:
+        accounts = self.ctx.account_name_map()
+        meta = " · ".join(x for x in [
+            type_label(INCOME_SOURCE_LABELS, s.source_type),
+            FREQ_LABELS.get(s.frequency or "", ""),
+            accounts.get(s.deposit_account_id, "")] if x)
+        return ListTile(
+            s.id, s.name, meta, value=fmt_inr(self._service.net_monthly(s), compact=True) + "/mo",
+            badge=("Inactive", "neutral") if not s.is_active else None,
+            chip=self._month_status(s), icon_name="income",
+            muted=not s.is_active, selected=selected,
         )
-        for col in range(len(HISTORY_COLS) - 1):
-            self.history_table.horizontalHeader().setSectionResizeMode(
-                col, QHeaderView.ResizeMode.ResizeToContents
-            )
-        self.history_table.itemSelectionChanged.connect(self._on_entry_selection_changed)
-        self.history_table.doubleClicked.connect(self._on_edit_entry)
-        hist_layout.addWidget(self.history_table, 1)
-        d.addWidget(hist_box, 1)
 
-        self.detail_stack.addWidget(detail)
-        return self.detail_stack
-
-    # -----------------------------------------------------------------------
-    # Data
-    # -----------------------------------------------------------------------
-    def _on_data_changed(self, topic: str) -> None:
-        if topic in self._topics:
-            self._dirty = True
-
-    def ensure_fresh(self) -> None:
-        if self._dirty:
+    def on_add(self) -> None:
+        dlg = IncomeDialog(self, accounts=self.ctx.account_options_active())
+        if dlg.exec() == IncomeDialog.DialogCode.Accepted:
+            src = dlg.get_source()
+            self._selected_id = self._service.create(src)
             self.refresh()
+            notify(f"Added {src.name}")
 
-    def refresh(self) -> None:
-        self._accounts = self.ctx.account_options_active()
-        self._account_names = self.ctx.account_name_map()
-        self._sources = self._service.list_active()
-        self._refresh_tiles()
-        self._refresh_kpis()
-        self._refresh_detail()
-        self._dirty = False
+    def on_activate(self, s: IncomeSource) -> None:
+        self._edit()
 
-    def _refresh_tiles(self) -> None:
-        # Tear down existing tiles
-        for t in self._tiles:
-            self.tile_layout.removeWidget(t)
-            t.deleteLater()
-        self._tiles = []
-        while self.tile_layout.count():
-            self.tile_layout.takeAt(0)
+    # ------------------------------------------------------------ detail
+    def render_detail(self, s: IncomeSource, panel: DetailPanel) -> None:
+        accounts = self.ctx.account_name_map()
+        meta = " · ".join(x for x in [type_label(INCOME_SOURCE_LABELS, s.source_type),
+                                      FREQ_LABELS.get(s.frequency or "", "")] if x)
+        status = self._month_status(s)
+        badges = [status] if status else []
+        if not s.is_active:
+            badges.append(("Inactive", "neutral"))
+        panel.set_header(s.name, meta, badges)
+        actions = []
+        if s.is_active:
+            actions.append(("Record this month", self._record, "primary", "check"))
+        actions += [("Edit", self._edit, "secondary", "edit"),
+                    ("Reactivate" if not s.is_active else "Deactivate", self._toggle, "ghost"),
+                    ("Delete", self._delete, "danger", "trash")]
+        panel.set_actions(actions)
 
-        for s in self._sources:
-            bg, fg = INCOME_SOURCE_BADGE.get(s.source_type, FALLBACK_BADGE)
-            tile = IncomeSourceTile(
-                s,
-                type_label=SOURCE_TYPE_LABELS.get(s.source_type, s.source_type),
-                type_bg=bg,
-                type_fg=fg,
-                freq_label=FREQ_LABELS.get(s.frequency or "", s.frequency or "—"),
-                account_name=self._account_names.get(s.deposit_account_id),
-                net_text=fmt_inr(self._service.net_monthly(s), compact=True),
-                month_status=self._month_status(s),
-                selected=(s.id == self._selected_id),
-                on_click=self._on_tile_clicked,
-                on_activate=self._on_tile_activated,
-                parent=self.tile_container,
-            )
-            self._tiles.append(tile)
-            self.tile_layout.addWidget(tile)
-        self.tile_layout.addStretch(1)
+        rows = [("Take-home per month", fmt_inr(self._service.net_monthly(s)), "positive")]
+        if s.employer:
+            rows.append(("Employer", s.employer))
+        rows.append(("Paid into", accounts.get(s.deposit_account_id, "Not linked")))
+        panel.add_stats("Overview", rows)
 
-        self.empty_label.setVisible(not self._sources)
-        self.scroll.setVisible(bool(self._sources))
-        self._update_source_buttons()
+        if s.source_type == "salary":
+            earnings = [("Basic", fmt_inr(s.basic or 0)), ("HRA", fmt_inr(s.hra or 0)),
+                        ("Special allowance", fmt_inr(s.special_allow or 0))]
+            deductions = [("PF (you)", fmt_inr(s.pf_employee or 0), "negative"),
+                          ("PF (employer)", fmt_inr(s.pf_employer or 0)),
+                          ("Professional tax", fmt_inr(s.professional_tax or 0), "negative"),
+                          ("TDS", fmt_inr(s.tds or 0), "negative")]
+            panel.add_stats("Monthly earnings", earnings)
+            panel.add_stats("Monthly deductions", deductions, columns=4)
+            panel.add_stats("Net", [("Take-home", fmt_inr(IncomeService.net_monthly(s)), "positive")])
 
-    def _month_status(self, s: IncomeSource) -> str:
-        """'logged' | 'pending' | 'na' for the current month."""
-        if not self._service.is_recurring_monthly(s):
-            return "na"
-        period = date.today().strftime("%Y-%m")
-        return "logged" if self._service.has_logged(s.id, period) else "pending"  # type: ignore[arg-type]
+        panel.add_section("Monthly history", self._history_widget(s))
+        if s.notes:
+            panel.add_text(s.notes)
 
-    def _refresh_kpis(self) -> None:
-        total_gross = total_net = total_deduct = 0.0
-        active_count = 0
-        for s in self._sources:
-            if not s.is_active:
-                continue
-            active_count += 1
-            total_gross  += self._service.gross_monthly(s)
-            total_deduct += self._service.deductions_monthly(s)
-            total_net    += self._service.net_monthly(s)
+    def _history_widget(self, s: IncomeSource) -> QWidget:
+        holder = QWidget()
+        col = QVBoxLayout(holder)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(8)
+        self._entries = self._service.list_entries(s.id)
+        accounts = self.ctx.account_name_map()
 
-        this_month = date.today().strftime("%Y-%m")
-        received = self._service.total_received(this_month)
+        table = QTableWidget(len(self._entries), len(HISTORY_COLS))
+        table.setHorizontalHeaderLabels(HISTORY_COLS)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(36)
+        table.setShowGrid(False)
+        table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        header = table.horizontalHeader()
+        for c in range(len(HISTORY_COLS)):
+            header.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        for r, e in enumerate(self._entries):
+            month = QTableWidgetItem(_month_label(e.period_month))
+            month.setData(Qt.ItemDataRole.UserRole, e.id)
+            table.setItem(r, 0, month)
+            for c, value in ((1, e.expected_amount), (2, e.actual_amount)):
+                it = QTableWidgetItem(fmt_inr(value, compact=True) if value else "-")
+                it.setTextAlignment(right)
+                table.setItem(r, c, it)
+            if e.expected_amount:
+                delta = (e.actual_amount or 0) - e.expected_amount
+                it = QTableWidgetItem(("+" if delta >= 0 else "−") + fmt_inr(abs(delta), compact=True))
+                it.setForeground(theme.qcolor("positive" if delta >= 0 else "negative"))
+            else:
+                it = QTableWidgetItem("-")
+            it.setTextAlignment(right)
+            table.setItem(r, 3, it)
+            table.setItem(r, 4, QTableWidgetItem(accounts.get(e.account_id, "-")))
+            posted = QTableWidgetItem("Yes" if e.transaction_id else "No")
+            posted.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            table.setItem(r, 5, posted)
+        table.setMinimumHeight(min(320, 44 + 36 * max(1, len(self._entries))))
+        table.doubleClicked.connect(lambda _i: self._edit_entry())
+        self.history_table = table
 
-        self.kpi_gross.set_value(fmt_inr(total_gross, compact=True))
-        self.kpi_net.set_value(fmt_inr(total_net, compact=True))
-        self.kpi_deduct.set_value(fmt_inr(total_deduct, compact=True))
-        self.kpi_received.set_value(fmt_inr(received, compact=True))
-        self.kpi_sources.set_value(str(active_count))
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        self.edit_entry_btn = button("Edit month", "secondary", "edit", on_click=self._edit_entry,
+                                     size="small")
+        self.delete_entry_btn = button("Delete month", "danger", "trash",
+                                       on_click=self._delete_entry, size="small")
+        for b in (self.edit_entry_btn, self.delete_entry_btn):
+            b.setEnabled(False)
+            actions.addWidget(b)
+        actions.addStretch(1)
+        table.itemSelectionChanged.connect(self._on_entry_selection)
 
-    def _refresh_detail(self) -> None:
-        source = self._selected_source()
-        if source is None:
-            self.detail_stack.setCurrentIndex(0)
-            self.record_btn.setEnabled(False)
-            return
-
-        self.detail_stack.setCurrentIndex(1)
-        self.record_btn.setEnabled(True)
-        self.detail_title.setText(source.name)
-
-        type_lbl = SOURCE_TYPE_LABELS.get(source.source_type, source.source_type)
-        freq_lbl = FREQ_LABELS.get(source.frequency or "", source.frequency or "—")
-        acct = self._account_names.get(source.deposit_account_id, "Not linked")
-        period = date.today().strftime("%Y-%m")
-        if not self._service.is_recurring_monthly(source):
-            month_txt = "This month: n/a"
-        elif self._service.has_logged(source.id, period):  # type: ignore[arg-type]
-            month_txt = "This month: ✓ logged"
+        if self._entries:
+            col.addWidget(table)
+            col.addLayout(actions)
         else:
-            month_txt = "This month: ⚠ pending"
-        self.detail_subtitle.setText(
-            f"{type_lbl}  ·  {freq_lbl}  ·  Deposits to: {acct}  ·  {month_txt}"
-        )
+            col.addWidget(label("Nothing recorded yet. Use “Record this month” when it arrives.",
+                                "muted", wrap=True))
+        return holder
 
-        if source.source_type == "salary":
-            self.breakdown_panel.load(source)
-            self.breakdown_panel.setVisible(True)
-        else:
-            self.breakdown_panel.setVisible(False)
-
-        self._refresh_history(source)
-
-    def _refresh_history(self, source: IncomeSource) -> None:
-        self._entries = self._service.list_entries(source.id)  # type: ignore[arg-type]
-        self.history_table.blockSignals(True)
-        self.history_table.setRowCount(0)
-        for e in self._entries:
-            row = self.history_table.rowCount()
-            self.history_table.insertRow(row)
-
-            month_item = QTableWidgetItem(e.period_month)
-            month_item.setData(Qt.ItemDataRole.UserRole, e.id)
-            self.history_table.setItem(row, 0, month_item)
-
-            self.history_table.setItem(row, 1, _AmountItem(e.expected_amount or 0.0))
-            self.history_table.setItem(row, 2, _AmountItem(e.actual_amount or 0.0))
-
-            # Variance = actual - expected (blank when no expected snapshot)
-            self.history_table.setItem(row, 3, _VarianceItem(e.expected_amount, e.actual_amount))
-
-            acct = self._account_names.get(e.account_id, "—")
-            self.history_table.setItem(row, 4, QTableWidgetItem(acct))
-
-            posted = "✓" if e.transaction_id else "—"
-            posted_item = QTableWidgetItem(posted)
-            posted_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if e.transaction_id:
-                posted_item.setForeground(QColor("#065f46"))
-            self.history_table.setItem(row, 5, posted_item)
-
-            self.history_table.setItem(row, 6, QTableWidgetItem(e.notes or ""))
-        self.history_table.blockSignals(False)
-        self._on_entry_selection_changed()
-
-    # -----------------------------------------------------------------------
-    # Selection helpers
-    # -----------------------------------------------------------------------
-
-    def _selected_source(self) -> Optional[IncomeSource]:
-        if self._selected_id is None:
-            return None
-        return next((s for s in self._sources if s.id == self._selected_id), None)
-
-    def _selected_entry(self) -> Optional[IncomeEntry]:
-        rows = self.history_table.selectionModel().selectedRows()
-        if not rows:
-            return None
-        item = self.history_table.item(rows[0].row(), 0)
-        if item is None:
-            return None
-        eid = item.data(Qt.ItemDataRole.UserRole)
-        return next((e for e in self._entries if e.id == eid), None)
-
-    def _update_source_buttons(self) -> None:
-        source = self._selected_source()
-        has_sel = source is not None
-        self.edit_btn.setEnabled(has_sel)
-        self.delete_btn.setEnabled(has_sel)
-        self.toggle_btn.setEnabled(has_sel)
-        if source is not None:
-            lbl = "Deactivate" if source.is_active else "Activate"
-            icon = "⏸" if source.is_active else "▶"
-            self.toggle_btn.setText(f"{icon}  {lbl}")
-
-    def _on_tile_clicked(self, source: IncomeSource) -> None:
-        self._selected_id = source.id
-        for t in self._tiles:
-            t.set_selected(t.source.id == source.id)
-        self._update_source_buttons()
-        self._refresh_detail()
-
-    def _on_tile_activated(self, source: IncomeSource) -> None:
-        """Double-click a tile → select and open the edit dialog."""
-        self._on_tile_clicked(source)
-        self._on_edit()
-
-    def _on_entry_selection_changed(self) -> None:
+    def _on_entry_selection(self) -> None:
         has = self._selected_entry() is not None
         self.edit_entry_btn.setEnabled(has)
         self.delete_entry_btn.setEnabled(has)
 
-    # -----------------------------------------------------------------------
-    # Source CRUD
-    # -----------------------------------------------------------------------
+    def _selected_entry(self):
+        if self.history_table is None:
+            return None
+        rows = self.history_table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        item = self.history_table.item(rows[0].row(), 0)
+        eid = item.data(Qt.ItemDataRole.UserRole) if item else None
+        return next((e for e in self._entries if e.id == eid), None)
 
-    def _on_add(self) -> None:
-        dlg = IncomeDialog(self, accounts=self._accounts)
-        if dlg.exec() == IncomeDialog.DialogCode.Accepted:
-            self._service.create(dlg.get_source())
-            self.refresh()
-
-    def _on_edit(self) -> None:
-        source = self._selected_source()
-        if source is None:
+    # ----------------------------------------------------------- actions
+    def _record(self) -> None:
+        s = self.selected()
+        if s is None:
             return
-        dlg = IncomeDialog(self, source, accounts=self._accounts)
-        if dlg.exec() == IncomeDialog.DialogCode.Accepted:
-            self._service.update(dlg.get_source())
-            self.refresh()
+        self.record_for(s)
 
-    def _on_toggle_active(self) -> None:
-        source = self._selected_source()
-        if source is None:
-            return
-        self._service.toggle_active(source)
-        self.refresh()
-
-    def _on_delete(self) -> None:
-        source = self._selected_source()
-        if source is None:
-            return
-        ans = QMessageBox.question(
-            self,
-            "Delete Income Source",
-            f"Delete «{source.name}»?\nIts monthly history will also be removed.\n"
-            f"This cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-        )
-        if ans == QMessageBox.StandardButton.Yes:
-            self._service.delete(source.id)  # type: ignore[arg-type]
-            self._selected_id = None
-            self.refresh()
-
-    # -----------------------------------------------------------------------
-    # Monthly entry CRUD
-    # -----------------------------------------------------------------------
-
-    def _on_record(self) -> None:
-        source = self._selected_source()
-        if source is None:
-            return
-        expected = self._service.net_monthly(source)
-        dlg = RecordIncomeDialog(source, self._accounts, expected_net=expected, parent=self)
+    def record_for(self, s: IncomeSource) -> bool:
+        dlg = RecordIncomeDialog(s, self.ctx.account_options_active(),
+                                 expected_net=self._service.net_monthly(s), parent=self)
         if dlg.exec() != RecordIncomeDialog.DialogCode.Accepted:
-            return
+            return False
         try:
-            self._service.record_month(source, **dlg.get_values())
+            self._service.record_month(s, **dlg.get_values())
         except ValueError as exc:
-            QMessageBox.warning(self, "Could not record", str(exc))
-            return
+            QMessageBox.warning(self, "Couldn't record", str(exc))
+            return False
         self.refresh()
+        notify(f"Recorded {s.name}")
+        return True
 
-    def _on_edit_entry(self) -> None:
-        source = self._selected_source()
+    def _edit_entry(self) -> None:
+        s = self.selected()
         entry = self._selected_entry()
-        if source is None or entry is None:
+        if s is None or entry is None:
             return
-        expected = self._service.net_monthly(source)
-        dlg = RecordIncomeDialog(
-            source, self._accounts, expected_net=expected, entry=entry, parent=self
-        )
+        dlg = RecordIncomeDialog(s, self.ctx.account_options_active(),
+                                 expected_net=self._service.net_monthly(s), entry=entry, parent=self)
         if dlg.exec() != RecordIncomeDialog.DialogCode.Accepted:
             return
         values = dlg.get_values()
         try:
-            # If the month was changed, drop the old entry (and its ledger
-            # effect) before recording under the new period.
             if values["period_month"] != entry.period_month:
-                self._service.delete_entry(entry.id)  # type: ignore[arg-type]
-            self._service.record_month(source, **values)
+                self._service.delete_entry(entry.id)
+            self._service.record_month(s, **values)
         except ValueError as exc:
-            QMessageBox.warning(self, "Could not save", str(exc))
+            QMessageBox.warning(self, "Couldn't save", str(exc))
             return
         self.refresh()
+        notify("Saved")
 
-    def _on_delete_entry(self) -> None:
+    def _delete_entry(self) -> None:
         entry = self._selected_entry()
         if entry is None:
             return
         ans = QMessageBox.question(
-            self,
-            "Delete Income Entry",
-            f"Delete the {entry.period_month} entry?\n"
-            f"Any linked ledger transaction and its balance effect will be reversed.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-        )
+            self, "Delete month",
+            f"Delete the {_month_label(entry.period_month)} entry? If it was posted to an "
+            "account, that transaction is removed too and the balance adjusted back.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
         if ans == QMessageBox.StandardButton.Yes:
-            self._service.delete_entry(entry.id)  # type: ignore[arg-type]
+            self._service.delete_entry(entry.id)
+            self.refresh()
+            notify("Deleted")
+
+    def _edit(self) -> None:
+        s = self.selected()
+        if s is None:
+            return
+        dlg = IncomeDialog(self, s, accounts=self.ctx.account_options_active())
+        if dlg.exec() == IncomeDialog.DialogCode.Accepted:
+            self._service.update(dlg.get_source())
+            self.refresh()
+            notify("Saved")
+
+    def _toggle(self) -> None:
+        s = self.selected()
+        if s is not None:
+            self._service.toggle_active(s)
             self.refresh()
 
-
-# ── custom table items ──────────────────────────────────────────────────────
-
-class _BadgeItem(QTableWidgetItem):
-    def __init__(self, text: str, bg: str, fg: str) -> None:
-        super().__init__(f"  {text}  ")
-        self.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setBackground(QColor(bg))
-        self.setForeground(QColor(fg))
-        f = self.font()
-        f.setBold(True)
-        self.setFont(f)
-
-
-class _AmountItem(QTableWidgetItem):
-    def __init__(self, value: float, negative: bool = False) -> None:
-        super().__init__(fmt_inr(value, compact=True) if value else "—")
-        self.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        if negative and value > 0:
-            self.setForeground(QColor("#dc2626"))
-
-
-class _VarianceItem(QTableWidgetItem):
-    """Actual − expected, coloured green (surplus) / red (shortfall)."""
-
-    def __init__(self, expected, actual) -> None:
-        if not expected:
-            super().__init__("—")
-            self.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.setForeground(QColor("#9ca3af"))
+    def _delete(self) -> None:
+        s = self.selected()
+        if s is None:
             return
-        delta = (actual or 0.0) - expected
-        sign = "+" if delta >= 0 else "−"
-        super().__init__(f"{sign}{fmt_inr(abs(delta), compact=True)}")
-        self.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.setForeground(QColor("#065f46") if delta >= 0 else QColor("#dc2626"))
-
-
-# ── salary breakdown panel ──────────────────────────────────────────────────
-
-class _SalaryBreakdownPanel(QFrame):
-    """Shows a salary-type income source's component breakdown."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setObjectName("breakdownPanel")
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(16, 12, 16, 12)
-        root.setSpacing(10)
-
-        header = QLabel("Salary Breakdown")
-        header.setObjectName("sectionLabel")
-        f = header.font()
-        f.setBold(True)
-        f.setPointSize(f.pointSize() + 1)
-        header.setFont(f)
-        root.addWidget(header)
-
-        earn_box = QGroupBox("Earnings")
-        earn_grid = QGridLayout(earn_box)
-        self._earn_labels: dict[str, QLabel] = {}
-        for i, key in enumerate(["Basic", "HRA", "Special Allow"]):
-            lbl = QLabel(key)
-            lbl.setObjectName("kpiTitle")
-            val = QLabel("—")
-            val.setObjectName("kpiValue")
-            earn_grid.addWidget(lbl, 0, i)
-            earn_grid.addWidget(val, 1, i)
-            self._earn_labels[key] = val
-        root.addWidget(earn_box)
-
-        ded_box = QGroupBox("Deductions")
-        ded_grid = QGridLayout(ded_box)
-        self._ded_labels: dict[str, QLabel] = {}
-        for i, key in enumerate(["PF (Employee)", "PF (Employer)", "Prof. Tax", "TDS"]):
-            lbl = QLabel(key)
-            lbl.setObjectName("kpiTitle")
-            val = QLabel("—")
-            val.setObjectName("kpiValue")
-            val.setStyleSheet("color: #dc2626;")
-            ded_grid.addWidget(lbl, 0, i)
-            ded_grid.addWidget(val, 1, i)
-            self._ded_labels[key] = val
-        root.addWidget(ded_box)
-
-        net_row = QHBoxLayout()
-        net_title = QLabel("Net Take-Home / Month:")
-        net_title.setObjectName("kpiTitle")
-        f2 = net_title.font()
-        f2.setBold(True)
-        net_title.setFont(f2)
-        self._net_val = QLabel("—")
-        self._net_val.setObjectName("kpiValue")
-        f3 = self._net_val.font()
-        f3.setBold(True)
-        f3.setPointSize(f3.pointSize() + 2)
-        self._net_val.setFont(f3)
-        self._net_val.setStyleSheet("color: #065f46;")
-        net_row.addWidget(net_title)
-        net_row.addWidget(self._net_val)
-        net_row.addStretch()
-        root.addLayout(net_row)
-
-    def load(self, s: IncomeSource) -> None:
-        def _f(v: Optional[float]) -> str:
-            return fmt_inr(v) if v else "—"
-
-        self._earn_labels["Basic"].setText(_f(s.basic))
-        self._earn_labels["HRA"].setText(_f(s.hra))
-        self._earn_labels["Special Allow"].setText(_f(s.special_allow))
-
-        self._ded_labels["PF (Employee)"].setText(_f(s.pf_employee))
-        self._ded_labels["PF (Employer)"].setText(_f(s.pf_employer))
-        self._ded_labels["Prof. Tax"].setText(_f(s.professional_tax))
-        self._ded_labels["TDS"].setText(_f(s.tds))
-
-        net = IncomeService.net_monthly(s)  # static calculator on detail sub-panel
-        self._net_val.setText(fmt_inr(net))
+        ans = QMessageBox.question(
+            self, "Delete income source",
+            f"Delete “{s.name}” and its monthly history? This can't be undone. "
+            "(To keep the history, deactivate it instead.)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        if ans == QMessageBox.StandardButton.Yes:
+            self._service.delete(s.id)
+            self._selected_id = None
+            self.refresh()
+            notify("Deleted")

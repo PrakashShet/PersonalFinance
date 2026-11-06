@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from models.income import IncomeSource
+from ui.widgets.common import style_button_box
 
 
 SOURCE_TYPES = [
@@ -179,10 +180,11 @@ class IncomeDialog(QDialog):
 
         # ---- Buttons ----
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
+        style_button_box(buttons)
         root.addWidget(buttons)
 
         # Signals

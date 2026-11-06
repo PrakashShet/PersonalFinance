@@ -5,10 +5,15 @@ __pycache__/
 .venv/
 venv/
 
-# IDE
+# IDE / assistants
 .vscode/
 .idea/
 *.swp
+# Local Claude Code settings and the activated copy of docs/skills (the source).
+.claude/
+# Values you've confirmed are not personal, for tools/privacy_scan.py (they come
+# from your data, so the list itself stays local).
+.privacy-ignore
 
 # Runtime
 logs/*.log
@@ -35,3 +40,4 @@ htmlcov/
 data/store/
 data/user/
 logs/
+shots/

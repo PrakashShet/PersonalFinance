@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 from models.income import IncomeSource
 from models.income_entry import IncomeEntry
 from utils.formatters import fmt_inr
+from ui.widgets.common import style_button_box
 
 
 class RecordIncomeDialog(QDialog):
@@ -111,6 +112,7 @@ class RecordIncomeDialog(QDialog):
         )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
+        style_button_box(buttons)
         root.addWidget(buttons)
 
         self._sync_post_enabled()

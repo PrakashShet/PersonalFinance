@@ -1,436 +1,194 @@
-"""Goals tab - goal cards/list with progress, SIP requirements, CRUD."""
+"""Goals - what you're saving for, how far along you are, what it takes."""
 from __future__ import annotations
 
 from datetime import date
 from typing import Optional
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QFrame,
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QScrollArea,
-    QSplitter,
-    QStackedWidget,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt6.QtWidgets import QMessageBox
 
 from models.goal import Goal
-from services.app_context import AppContext
-from ui.theme.badges import (
-    FALLBACK_BADGE,
-    GOAL_PRIORITY_BADGE,
-    GOAL_STATUS_BADGE,
-)
 from ui.dialogs.goal_dialog import GoalDialog
-from ui.widgets.goal_tile import GoalTile
+from ui.theme.badges import GOAL_STATUS_TONE
+from ui.views.master_detail import MasterDetailView
+from ui.widgets.common import SegmentedControl, progress
+from ui.widgets.detail_panel import DetailPanel
 from ui.widgets.kpi_card import KpiCard
-from utils.formatters import fmt_inr, fmt_pct, fmt_date
+from ui.widgets.list_tile import ListTile
+from ui.widgets.toast import notify
+from utils.formatters import fmt_date, fmt_inr, fmt_pct
+
+FILTERS = [("active", "Active"), ("achieved", "Achieved"), ("paused", "Paused"), ("all", "All")]
+PRIORITY = {1: "Top priority", 2: "High priority", 3: "Medium priority", 4: "Low priority",
+            5: "Someday"}
 
 
-PRIORITY_LABELS = {1: "P1", 2: "P2", 3: "P3", 4: "P4", 5: "P5"}
-
-STATUS_FILTER_ORDER = ["all", "active", "achieved", "paused", "abandoned"]
-STATUS_FILTER_LABELS = {
-    "all": "All", "active": "Active", "achieved": "Achieved",
-    "paused": "Paused", "abandoned": "Abandoned",
-}
-
-
-def _months_remaining(target_date: Optional[str]) -> int:
+def _months_left(target_date: Optional[str]) -> Optional[int]:
     if not target_date:
-        return 0
+        return None
     try:
-        td = date.fromisoformat(target_date)
-        today = date.today()
-        return max(0, (td.year - today.year) * 12 + (td.month - today.month))
+        td = date.fromisoformat(target_date[:10])
     except ValueError:
-        return 0
+        return None
+    today = date.today()
+    return (td.year - today.year) * 12 + (td.month - today.month)
 
 
-def _time_left_label(months: int) -> str:
+def _time_left(months: Optional[int]) -> str:
+    if months is None:
+        return "No target date"
     if months <= 0:
-        return "Overdue"
+        return "Target date passed"
     y, m = divmod(months, 12)
-    parts = []
-    if y:
-        parts.append(f"{y}y")
-    if m:
-        parts.append(f"{m}m")
-    return " ".join(parts) or "< 1m"
+    return " ".join(p for p in (f"{y} yr" if y else "", f"{m} mo" if m else "") if p) + " left"
 
 
-class GoalsView(QWidget):
-    def __init__(self, ctx: AppContext) -> None:
-        super().__init__()
-        self.ctx = ctx
-        self._topics = {"goals", "goal_holdings", "holdings"}
-        self._dirty = True
-        self._svc = ctx.goal_service
-        self._goals: list[Goal] = []
-        self._tiles: list[GoalTile] = []
-        self._active_filter = "active"
-        self._selected_id: Optional[int] = None
-        self.ctx.events.changed.connect(self._on_data_changed)
-        self._build()
-        self.refresh()
+class GoalsView(MasterDetailView):
+    title = "Goals"
+    subtitle = "Save towards what matters. Link investments and progress updates itself."
+    add_label = "Add goal"
+    topics = frozenset({"goals", "goal_holdings", "holdings"})
+    inactive_label = None
+    empty_icon = "goals"
+    empty_title = "No goals here"
+    empty_text = "Set a goal - a house, education, retirement - and see the monthly amount it needs."
+    select_hint = "Select a goal to see progress and the monthly amount needed."
 
-    def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(20, 16, 20, 16)
-        root.setSpacing(14)
+    def __init__(self, ctx) -> None:
+        self._filter = "active"
+        super().__init__(ctx)
 
-        hdr = QHBoxLayout()
-        title = QLabel("Goals")
-        title.setObjectName("pageTitle")
-        hdr.addWidget(title)
-        hdr.addStretch()
-        self.add_btn = QPushButton("Add Goal")
-        self.add_btn.setObjectName("primaryBtn")
-        self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.add_btn.clicked.connect(self._on_add)
-        hdr.addWidget(self.add_btn)
-        root.addLayout(hdr)
+    def build_kpis(self):
+        self.k_target = KpiCard("Total target", icon_name="goals")
+        self.k_saved = KpiCard("Saved so far", icon_name="coins")
+        self.k_sip = KpiCard("Needed per month", icon_name="repeat")
+        self.k_count = KpiCard("Active goals", icon_name="check_circle")
+        return [self.k_target, self.k_saved, self.k_sip, self.k_count]
 
-        kpi_row = QGridLayout()
-        kpi_row.setSpacing(12)
-        self.kpi_total   = KpiCard("Total Target",   "")
-        self.kpi_current = KpiCard("Total Saved",    "")
-        self.kpi_sip     = KpiCard("Total Req. SIP", "")
-        self.kpi_count   = KpiCard("Active Goals",   "")
-        for i, w in enumerate([self.kpi_total, self.kpi_current,
-                                self.kpi_sip, self.kpi_count]):
-            kpi_row.addWidget(w, 0, i)
-        root.addLayout(kpi_row)
+    def build_filters(self):
+        self.filter_seg = SegmentedControl(FILTERS, "active")
+        self.filter_seg.changed.connect(self._on_filter)
+        return self.filter_seg
 
-        pill_row = QHBoxLayout()
-        pill_row.setSpacing(6)
-        self._pills: dict[str, QPushButton] = {}
-        for key in STATUS_FILTER_ORDER:
-            btn = QPushButton(STATUS_FILTER_LABELS[key])
-            btn.setCheckable(True)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setProperty("filterPill", True)
-            btn.clicked.connect(lambda _c, k=key: self._on_filter(k))
-            pill_row.addWidget(btn)
-            self._pills[key] = btn
-        self._pills["active"].setChecked(True)
-        pill_row.addStretch()
-        root.addLayout(pill_row)
+    def fetch(self, include_inactive: bool):
+        svc = self.ctx.goal_service
+        goals = svc.list_all()
+        svc.refresh_all_linked_amounts(goals)
+        return svc.list_all()
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
+    def filter_items(self, items):
+        if self._filter == "all":
+            return items
+        return [g for g in items if g.status == self._filter]
 
-        # Scrollable list of goal tiles
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.tile_container = QWidget()
-        self.tile_layout = QVBoxLayout(self.tile_container)
-        self.tile_layout.setContentsMargins(0, 4, 6, 4)
-        self.tile_layout.setSpacing(10)
-        self.tile_layout.addStretch(1)
-        self.scroll.setWidget(self.tile_container)
-        self.scroll.setMinimumHeight(180)
+    def refresh_kpis(self, items) -> None:
+        svc = self.ctx.goal_service
+        active = [g for g in items if g.status == "active"]
+        target = sum(g.target_amount for g in active)
+        saved = sum(g.current_amount for g in active)
+        self.k_target.set_value(fmt_inr(target, compact=True))
+        self.k_saved.set_value(fmt_inr(saved, compact=True))
+        self.k_saved.set_hint(f"{saved / target * 100:.0f}% of target" if target else "")
+        self.k_sip.set_value(fmt_inr(sum(svc.required_sip(g) for g in active), compact=True))
+        self.k_sip.set_hint("to hit every target on time")
+        self.k_count.set_value(str(len(active)))
 
-        self.empty_label = QLabel("No goals here. Click \"Add Goal\" to create one.")
-        self.empty_label.setObjectName("tileFlags")
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setWordWrap(True)
-        self.empty_label.hide()
+    def make_tile(self, g: Goal, selected: bool) -> ListTile:
+        pct = g.progress_pct
+        months = _months_left(g.target_date)
+        meta = " · ".join(x for x in [
+            f"By {fmt_date(g.target_date, '%b %Y')}" if g.target_date else "",
+            PRIORITY.get(g.priority or 3, "")] if x)
+        badge = None if g.status == "active" else (g.status.title(), GOAL_STATUS_TONE.get(g.status, "neutral"))
+        tone = "positive" if pct >= 100 else ("warning" if months is not None and months <= 0 else "")
+        return ListTile(
+            g.id, g.name, meta,
+            value=f"{fmt_inr(g.current_amount, compact=True)} of {fmt_inr(g.target_amount, compact=True)}",
+            badge=badge, progress_pct=pct, progress_tone=tone, icon_name="goals",
+            muted=g.status in ("paused", "abandoned"), selected=selected,
+        )
 
-        action_bar = QHBoxLayout()
-        self.edit_btn   = QPushButton("Edit")
-        self.edit_btn.setEnabled(False)
-        self.edit_btn.clicked.connect(self._on_edit)
-        self.toggle_btn = QPushButton("Pause")
-        self.toggle_btn.setEnabled(False)
-        self.toggle_btn.clicked.connect(self._on_toggle)
-        self.delete_btn = QPushButton("Delete")
-        self.delete_btn.setEnabled(False)
-        self.delete_btn.setObjectName("dangerBtn")
-        self.delete_btn.clicked.connect(self._on_delete)
-        action_bar.addWidget(self.edit_btn)
-        action_bar.addWidget(self.toggle_btn)
-        action_bar.addWidget(self.delete_btn)
-        action_bar.addStretch()
-
-        list_pane = QWidget()
-        tp = QVBoxLayout(list_pane)
-        tp.setContentsMargins(0, 0, 0, 0)
-        tp.setSpacing(6)
-        tp.addWidget(self.scroll, 1)
-        tp.addWidget(self.empty_label)
-        tp.addLayout(action_bar)
-        splitter.addWidget(list_pane)
-
-        # Right: placeholder until a goal is selected, then the detail panel
-        self.detail_stack = QStackedWidget()
-        placeholder = QLabel("Select a goal to see its details.")
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder.setObjectName("tileFlags")
-        placeholder.setWordWrap(True)
-        self.detail_stack.addWidget(placeholder)
-        self.detail = _GoalDetailPanel()
-        self.detail_stack.addWidget(self.detail)
-        splitter.addWidget(self.detail_stack)
-
-        splitter.setSizes([520, 520])
-        root.addWidget(splitter, 1)
-
-    def _on_data_changed(self, topic: str) -> None:
-        if topic in self._topics:
-            self._dirty = True
-
-    def ensure_fresh(self) -> None:
-        if self._dirty:
+    def on_add(self) -> None:
+        dlg = GoalDialog(self, holdings=self.ctx.goal_service.holdings_for_dialog())
+        if dlg.exec() == GoalDialog.DialogCode.Accepted:
+            goal = dlg.get_goal()
+            self._selected_id = self.ctx.goal_service.create(goal, dlg.selected_holding_ids())
             self.refresh()
+            notify(f"Added goal {goal.name}")
 
-    def refresh(self) -> None:
-        self._goals = self._svc.list_all()
-        self._svc.refresh_all_linked_amounts(self._goals)
-        self._goals = self._svc.list_all()
-        self._refresh_tiles()
-        self._refresh_kpis()
-        self._dirty = False
-
-    def _holdings_list(self) -> list:
-        return self._svc.holdings_for_dialog()
-
-    def _visible_goals(self) -> list[Goal]:
-        if self._active_filter == "all":
-            return self._goals
-        return [g for g in self._goals if g.status == self._active_filter]
-
-    def _refresh_tiles(self) -> None:
-        for t in self._tiles:
-            self.tile_layout.removeWidget(t)
-            t.deleteLater()
-        self._tiles = []
-        while self.tile_layout.count():
-            self.tile_layout.takeAt(0)
-
-        visible = self._visible_goals()
-        for g in visible:
-            p = g.priority or 3
-            pbg, pfg = GOAL_PRIORITY_BADGE.get(p, FALLBACK_BADGE)
-            sbg, sfg = GOAL_STATUS_BADGE.get(g.status, FALLBACK_BADGE)
-            pct = g.progress_pct
-            bar_colour = "#16a34a" if pct >= 100 else "#f59e0b" if pct >= 50 else "#3b82f6"
-            tile = GoalTile(
-                g,
-                status_label=g.status.title(),
-                status_bg=sbg,
-                status_fg=sfg,
-                priority_label=PRIORITY_LABELS.get(p, f"P{p}"),
-                priority_bg=pbg,
-                priority_fg=pfg,
-                saved_text=fmt_inr(g.current_amount, compact=True),
-                target_text=fmt_inr(g.target_amount, compact=True),
-                pct=int(pct),
-                bar_colour=bar_colour,
-                selected=(g.id == self._selected_id),
-                on_click=self._on_tile_clicked,
-                on_activate=self._on_tile_activated,
-                parent=self.tile_container,
-            )
-            self._tiles.append(tile)
-            self.tile_layout.addWidget(tile)
-        self.tile_layout.addStretch(1)
-
-        self.empty_label.setVisible(not visible)
-        self.scroll.setVisible(bool(visible))
-        self._update_buttons()
-
-        sel = self._selected_goal()
-        if sel is not None and any(t.goal.id == sel.id for t in self._tiles):
-            self.detail.load(
-                sel,
-                self._svc.required_sip(sel),
-                self._svc.linked_holding_names(sel.id),
-            )
-            self.detail_stack.setCurrentIndex(1)
-        else:
-            self.detail_stack.setCurrentIndex(0)
-
-    def _refresh_kpis(self) -> None:
-        active = [g for g in self._goals if g.status == "active"]
-        total_target  = sum(g.target_amount  for g in active)
-        total_current = sum(g.current_amount for g in active)
-        total_sip = sum(self._svc.required_sip(g) for g in active)
-        self.kpi_total.set_value(fmt_inr(total_target, compact=True))
-        self.kpi_current.set_value(fmt_inr(total_current, compact=True))
-        self.kpi_sip.set_value(fmt_inr(total_sip, compact=True))
-        self.kpi_count.set_value(str(len(active)))
+    def on_activate(self, g: Goal) -> None:
+        self._edit()
 
     def _on_filter(self, key: str) -> None:
-        self._active_filter = key
-        for k, btn in self._pills.items():
-            btn.setChecked(k == key)
+        self._filter = key
         self._selected_id = None
-        self.detail_stack.setCurrentIndex(0)
-        self._refresh_tiles()
-
-    def _update_buttons(self) -> None:
-        g = self._selected_goal()
-        has_sel = g is not None
-        self.edit_btn.setEnabled(has_sel)
-        self.delete_btn.setEnabled(has_sel)
-        self.toggle_btn.setEnabled(has_sel)
-        if g is not None:
-            self.toggle_btn.setText("Resume" if g.status == "paused" else "Pause")
-
-    def _on_tile_clicked(self, g: Goal) -> None:
-        self._selected_id = g.id
-        for t in self._tiles:
-            t.set_selected(t.goal.id == g.id)
-        self._update_buttons()
-        self.detail.load(
-            g,
-            self._svc.required_sip(g),
-            self._svc.linked_holding_names(g.id),
-        )
-        self.detail_stack.setCurrentIndex(1)
-
-    def _on_tile_activated(self, g: Goal) -> None:
-        self._on_tile_clicked(g)
-        self._on_edit()
-
-    def _selected_goal(self) -> Optional[Goal]:
-        if self._selected_id is None:
-            return None
-        return next((g for g in self._goals if g.id == self._selected_id), None)
-
-    def _on_add(self) -> None:
-        dlg = GoalDialog(self, holdings=self._holdings_list())
-        if dlg.exec() == GoalDialog.DialogCode.Accepted:
-            self._svc.create(dlg.get_goal(), dlg.selected_holding_ids())
-            self.refresh()
-
-    def _on_edit(self) -> None:
-        g = self._selected_goal()
-        if g is None:
-            return
-        dlg = GoalDialog(
-            self,
-            g,
-            holdings=self._holdings_list(),
-            linked_ids=self._svc.linked_holding_ids(g.id),
-        )
-        if dlg.exec() == GoalDialog.DialogCode.Accepted:
-            self._svc.update(dlg.get_goal(), dlg.selected_holding_ids())
-            self.refresh()
-
-    def _on_toggle(self) -> None:
-        g = self._selected_goal()
-        if g is None:
-            return
-        self._svc.toggle_paused(g)
         self.refresh()
 
-    def _on_delete(self) -> None:
-        g = self._selected_goal()
+    def render_detail(self, g: Goal, panel: DetailPanel) -> None:
+        svc = self.ctx.goal_service
+        badges = [(g.status.title(), GOAL_STATUS_TONE.get(g.status, "neutral"))]
+        panel.set_header(g.name, PRIORITY.get(g.priority or 3, ""), badges)
+        panel.set_actions([
+            ("Edit", self._edit, "primary", "edit"),
+            ("Resume" if g.status == "paused" else "Pause", self._toggle, "secondary"),
+            ("Delete", self._delete, "danger", "trash"),
+        ])
+
+        pct = g.progress_pct
+        bar = progress(pct, "positive" if pct >= 100 else "", large=True)
+        panel.add_section(f"{pct:.0f}% saved", bar)
+
+        months = _months_left(g.target_date)
+        gap = max(0.0, g.target_amount - g.current_amount)
+        req = svc.required_sip(g)
+        rows = [("Target", fmt_inr(g.target_amount)),
+                ("Saved", fmt_inr(g.current_amount), "positive"),
+                ("Still needed", fmt_inr(gap), "negative" if gap > 0 else "positive")]
+        if g.target_date:
+            rows.append(("Target date", fmt_date(g.target_date)))
+            rows.append(("Time", _time_left(months), "warning" if (months or 0) <= 0 else None))
+        if req > 0:
+            rows.append(("Invest each month", fmt_inr(req), "accent"))
+        panel.add_stats("Progress", rows)
+
+        linked = svc.linked_holding_names(g.id)
+        assumptions = [("Expected return", fmt_pct((g.expected_return or 0) * 100) + " a year"),
+                       ("Inflation", fmt_pct((g.inflation_rate or 0) * 100) + " a year")]
+        if linked:
+            assumptions.append(("Funded by", ", ".join(linked)))
+        panel.add_stats("Plan", assumptions, columns=2)
+        if not linked and g.status == "active":
+            panel.add_banner("Link the investments that fund this goal (Edit) and its "
+                             "progress will update as they grow.", "info")
+        if g.notes:
+            panel.add_text(g.notes)
+
+    # ----------------------------------------------------------- actions
+    def _edit(self) -> None:
+        g = self.selected()
         if g is None:
             return
-        ans = QMessageBox.question(
-            self, "Delete Goal",
-            f"Delete '{g.name}'?\nThis cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-        )
-        if ans == QMessageBox.StandardButton.Yes:
-            self._svc.delete(g.id)
-            self._selected_id = None
+        svc = self.ctx.goal_service
+        dlg = GoalDialog(self, g, holdings=svc.holdings_for_dialog(),
+                         linked_ids=svc.linked_holding_ids(g.id))
+        if dlg.exec() == GoalDialog.DialogCode.Accepted:
+            svc.update(dlg.get_goal(), dlg.selected_holding_ids())
+            self.refresh()
+            notify("Saved")
+
+    def _toggle(self) -> None:
+        g = self.selected()
+        if g is not None:
+            self.ctx.goal_service.toggle_paused(g)
             self.refresh()
 
-
-class _GoalDetailPanel(QFrame):
-    def __init__(self) -> None:
-        super().__init__()
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setObjectName("breakdownPanel")
-        root = QVBoxLayout(self)
-        root.setContentsMargins(16, 12, 16, 12)
-        root.setSpacing(10)
-
-        self._header = QLabel("")
-        self._header.setObjectName("sectionLabel")
-        f = self._header.font()
-        f.setBold(True)
-        f.setPointSize(f.pointSize() + 1)
-        self._header.setFont(f)
-        root.addWidget(self._header)
-
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 100)
-        self._progress.setTextVisible(True)
-        self._progress.setFormat("%p%  saved")
-        self._progress.setFixedHeight(22)
-        root.addWidget(self._progress)
-
-        self._grid_widget = QWidget()
-        self._grid = QGridLayout(self._grid_widget)
-        self._grid.setHorizontalSpacing(32)
-        self._grid.setVerticalSpacing(4)
-        root.addWidget(self._grid_widget)
-        root.addStretch()
-
-    def load(self, g: Goal, req_sip: float, linked_names: Optional[list] = None) -> None:
-        p = g.priority or 3
-        self._header.setText(f"{g.name}  -  {g.status.title()}  (Priority {p})")
-
-        pct = int(g.progress_pct)
-        self._progress.setValue(min(100, pct))
-        colour = "#16a34a" if pct >= 100 else "#f59e0b" if pct >= 50 else "#3b82f6"
-        self._progress.setStyleSheet(
-            f"QProgressBar::chunk {{ background-color: {colour}; border-radius: 4px; }}")
-
-        while self._grid.count():
-            item = self._grid.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        gap = max(0, g.target_amount - g.current_amount)
-        months = _months_remaining(g.target_date)
-
-        fields = []
-
-        def _add(label, value, colour=""):
-            fields.append((label, value, colour))
-
-        _add("Target Amount",   fmt_inr(g.target_amount))
-        _add("Saved So Far",    fmt_inr(g.current_amount), "#16a34a")
-        _add("Remaining Gap",   fmt_inr(gap),              "#dc2626")
-        _add("Progress",        f"{g.progress_pct:.1f}%")
-        if g.target_date:
-            _add("Target Date",     fmt_date(g.target_date))
-            _add("Time Left",       _time_left_label(months),
-                 "#dc2626" if months == 0 else "")
-        if req_sip > 0:
-            _add("Required SIP/mo", fmt_inr(req_sip), "#1d4ed8")
-        _add("Expected Return", fmt_pct(g.expected_return * 100))
-        _add("Inflation Rate",  fmt_pct(g.inflation_rate  * 100))
-        if linked_names:
-            _add("Funded By", ", ".join(linked_names), "#16a34a")
-        if g.notes:
-            _add("Notes", g.notes)
-
-        COLS = 3
-        for i, (label, value, colour) in enumerate(fields):
-            row, col = divmod(i, COLS)
-            lbl = QLabel(label)
-            lbl.setObjectName("kpiTitle")
-            val = QLabel(value)
-            val.setObjectName("kpiValue")
-            vf = val.font()
-            vf.setBold(True)
-            val.setFont(vf)
-            if colour:
-                val.setStyleSheet(f"color: {colour};")
-            self._grid.addWidget(lbl, row * 2,     col)
-            self._grid.addWidget(val, row * 2 + 1, col)
+    def _delete(self) -> None:
+        g = self.selected()
+        if g is None:
+            return
+        ans = QMessageBox.question(self, "Delete goal", f"Delete “{g.name}”? This can't be undone.",
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        if ans == QMessageBox.StandardButton.Yes:
+            self.ctx.goal_service.delete(g.id)
+            self._selected_id = None
+            self.refresh()
+            notify("Deleted")

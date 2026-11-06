@@ -117,7 +117,13 @@ def test_full_session_persist_and_reload(bootstrapped_session):
 
 
 def test_bootstrap_matches_main_flow(tmp_path: Path, empty_store: Path):
-    """Smoke-check that loader + migrations produce queryable schema."""
+    """Smoke-check that loader + migrations produce queryable schema.
+
+    Mirrors a genuine first run: there is no categories.json yet, so the seed
+    categories must survive the store load. (An existing categories.json - even
+    "[]" - is the user's data and deliberately replaces the table.)
+    """
+    (empty_store / "categories.json").unlink()
     db = Database()
     db.connect(tmp_path / "boot.db")
     db.apply_schema(SCHEMA_PATH)
@@ -129,6 +135,7 @@ def test_bootstrap_matches_main_flow(tmp_path: Path, empty_store: Path):
 
     categories = db.fetch_all("SELECT id FROM categories")
     assert len(categories) > 0
+    assert (empty_store / "categories.json").exists()   # recreated for the user
 
     tables = db.fetch_all(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"

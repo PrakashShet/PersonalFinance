@@ -1,9 +1,13 @@
-"""Idempotent, additive schema migrations.
+"""Idempotent, additive SQLite column migrations.
 
-`schema.sql` uses ``CREATE TABLE IF NOT EXISTS``, so columns added to a table
-definition are NOT applied to a database created before the column existed.
-This module bridges that gap with ``ALTER TABLE`` on every boot - safe to run
-repeatedly. Called from ``main.bootstrap()`` right after the schema is applied.
+Since 1.0 the app rebuilds SQLite *in memory* from the JSON store on every
+launch, so the live database always starts from the current ``schema.sql`` and
+this module is a no-op there. It is kept for code (and tests) that open a
+persistent SQLite file created by an older schema.
+
+**Real data migrations live in ``services/store_migrations.py``** and operate on
+the JSON store - the source of truth - with a backup taken first. That is where
+renames, retypes and backfills belong.
 
 The account detail columns are derived from ``config.account_fields`` so the
 model, the database, and the UI cannot drift apart.

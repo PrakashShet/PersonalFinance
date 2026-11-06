@@ -1,94 +1,174 @@
-"""Personal Finance Manager - Entry Point.
+"""Personal Finance Manager - entry point.
 
-Bootstraps the application: loads CSV/JSON data into SQLite,
-launches the PyQt6 main window, and persists changes back on exit.
+Startup
+  1. One copy at a time: two copies would each save over the other's changes.
+  2. Theme first, so even an error message matches the rest of the app.
+  3. Open storage (services/storage.py): read and validate every data file,
+     migrate the format if needed (after a backup), load, take a startup
+     backup. A damaged file stops here with recovery instructions - nothing
+     is overwritten.
+  4. Main window. Saves follow every change (ui/autosave.py), plus a periodic
+     safety net that also records the daily net-worth snapshot.
+
+Shutdown: final save, then a shutdown backup.
 """
 from __future__ import annotations
 
+import shutil
 import sys
-from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QApplication
+from pathlib import Path
+from typing import Optional
+
+from PyQt6.QtCore import QLockFile, QUrl
+from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from config.settings import settings
 from db.connection import db
-from db.migrate import run_migrations
 from services.app_context import AppContext
-from services.data_loader import DataLoader
-from services.data_persister import DataPersister
+from services.preferences_service import PreferencesService
+from services.storage import Storage, StoreLoadError, StoreVersionError
+from ui.autosave import AutoSaver
 from ui.main_window import MainWindow
+from ui.theme import theme
+from ui.widgets.toast import notify
 from utils.logger import get_logger
 
 log = get_logger(__name__)
 
 
-def _record_net_worth_snapshot() -> None:
-    """Persist today's net-worth snapshot (idempotent per day).
-
-    Snapshots accumulate one row per day the app is used, which is what feeds
-    the long-term (25-30 year) net-worth trend chart.
-    """
-    try:
-        AppContext.create(db).net_worth_service.take_snapshot()
-    except Exception as e:  # never let a snapshot failure crash autosave/quit
-        log.error(f"Net-worth snapshot failed: {e}")
-
-
-def autosave() -> None:
-    """Periodic save so a crash can't lose more than one interval of work.
-
-    Skips the per-save backup (backups are made on quit) to stay lightweight.
-    """
-    try:
-        _record_net_worth_snapshot()
-        DataPersister(db).dump_store_data(settings.STORE_DIR, make_backup=False)
-        log.info("Autosave complete.")
-    except Exception as e:
-        log.error(f"Autosave failed: {e}")
+def import_legacy_data() -> Optional[Path]:
+    """Builds before 1.0 kept data beside the .exe. Copy it to the new home
+    once, if the new home has no data yet. The old folder is left untouched."""
+    legacy = settings.LEGACY_DATA_DIR
+    if legacy is None:
+        return None
+    src = legacy / "store"
+    if not src.is_dir() or not any(src.glob("*.json")):
+        return None
+    if settings.STORE_DIR.is_dir() and any(settings.STORE_DIR.glob("*.json")):
+        return None
+    shutil.copytree(src, settings.STORE_DIR, dirs_exist_ok=True)
+    old_backups = legacy / "user" / "backups"
+    if old_backups.is_dir():
+        shutil.copytree(old_backups, settings.BACKUP_DIR, dirs_exist_ok=True)
+    log.info(f"Imported data from the old location {legacy}")
+    return legacy
 
 
-def bootstrap() -> None:
-    """Initialize DB schema and hydrate from CSV/JSON files in data/store."""
-    log.info("Bootstrapping application...")
-    db.connect(settings.SQLITE_PATH)
-    db.apply_schema(settings.SCHEMA_PATH)
-    run_migrations(db)                              # additive column upgrades
-
-    loader = DataLoader(db)
-    loader.load_seed_data(settings.SEED_DIR)        # categories, account types, etc.
-    loader.load_store_data(settings.STORE_DIR)      # user's actual records
-    loader.load_reference_data(settings.REFERENCE_DIR)  # tax slabs, inflation, etc.
-    log.info("Bootstrap complete.")
+def remove_legacy_sqlite() -> None:
+    """SQLite now lives in memory; an old app.db file is stale scratch."""
+    for suffix in ("", "-wal", "-shm"):
+        path = Path(str(settings.LEGACY_SQLITE_PATH) + suffix)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
-def shutdown() -> None:
-    """Persist SQLite state back to CSV/JSON files in data/store."""
-    log.info("Shutting down - persisting data to disk...")
-    _record_net_worth_snapshot()
-    persister = DataPersister(db)
-    persister.dump_store_data(settings.STORE_DIR)
-    db.close()
-    log.info("Shutdown complete.")
+def show_store_error(err: StoreLoadError, latest_backup: Optional[Path]) -> None:
+    box = QMessageBox(QMessageBox.Icon.Critical, settings.APP_NAME,
+                      f"Your data file “{err.path.name}” {err.reason}")
+    lines = [
+        "The app has stopped before changing anything, so nothing has been overwritten.",
+        "",
+        "To recover: copy the files from the newest backup folder into your data folder "
+        "(replace when asked), then start the app again.",
+        "",
+        f"Data folder:  {settings.STORE_DIR}",
+        f"Newest backup:  {latest_backup or 'none found'}",
+    ]
+    box.setInformativeText("\n".join(lines))
+    open_backup = box.addButton("Open backup folder", QMessageBox.ButtonRole.ActionRole) if latest_backup else None
+    open_data = box.addButton("Open data folder", QMessageBox.ButtonRole.ActionRole)
+    box.addButton(QMessageBox.StandardButton.Close)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is open_backup and latest_backup:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(latest_backup)))
+    elif clicked is open_data:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(settings.STORE_DIR)))
 
 
 def main() -> int:
-    bootstrap()
-
     app = QApplication(sys.argv)
     app.setApplicationName(settings.APP_NAME)
-    app.setStyleSheet(settings.load_stylesheet())
+    app.setApplicationVersion(settings.APP_VERSION)
+    app.setOrganizationName("PersonalFinanceManager")
+    settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    window = MainWindow()
+    prefs = PreferencesService(settings.PREFS_PATH)
+    theme.install(app, prefs.get("theme") or "system")
+
+    lock = QLockFile(str(settings.LOCK_PATH))
+    lock.setStaleLockTime(0)          # held for the whole session; crashes are detected by PID
+    if not lock.tryLock(200):
+        QMessageBox.information(
+            None, settings.APP_NAME,
+            "Personal Finance Manager is already open.\n\nUse the window that's already "
+            "running - two copies at once would overwrite each other's changes.")
+        return 0
+
+    log.info(f"Starting {settings.APP_NAME} {settings.APP_VERSION} (data: {settings.DATA_DIR})")
+    imported = import_legacy_data()
+    remove_legacy_sqlite()
+
+    db.connect(settings.SQLITE_PATH)
+    storage = Storage(
+        db, settings.STORE_DIR, settings.BACKUP_DIR, settings.SEED_DIR,
+        settings.REFERENCE_DIR, settings.SCHEMA_PATH, app_version=settings.APP_VERSION,
+        mirror_dir=lambda: prefs.get("backup_mirror_dir"),
+    )
+    try:
+        report = storage.open()
+    except StoreLoadError as e:
+        log.error(f"Store failed validation: {e}")
+        show_store_error(e, storage.latest_backup())
+        return 1
+    except StoreVersionError as e:
+        log.error(str(e))
+        QMessageBox.critical(None, settings.APP_NAME, str(e))
+        return 1
+    except Exception as e:  # e.g. a backup could not be written before an upgrade
+        log.exception("Opening the data store failed")
+        QMessageBox.critical(
+            None, settings.APP_NAME,
+            f"Your data couldn't be opened safely, so the app stopped before changing "
+            f"anything.\n\n{e}\n\nData folder: {settings.STORE_DIR}\nLog: {settings.LOG_FILE}")
+        return 1
+
+    ctx = AppContext.create(db, preferences=prefs, storage=storage)
+
+    def snapshot() -> None:
+        try:
+            ctx.net_worth_service.take_snapshot()
+        except Exception:  # never let a snapshot stop a save
+            log.exception("Net-worth snapshot failed")
+
+    window = MainWindow(ctx)
+    saver = AutoSaver(storage, snapshot, settings.SAVE_DEBOUNCE_MS, settings.AUTOSAVE_INTERVAL_SEC)
+    saver.status.connect(window.set_save_status)
+    ctx.events.changed.connect(saver.request)
     window.show()
+    saver.save_now()
 
-    # Periodic autosave so an unexpected exit can't lose a whole session.
-    autosave_timer = QTimer()
-    autosave_timer.setInterval(max(15, settings.AUTOSAVE_INTERVAL_SEC) * 1000)
-    autosave_timer.timeout.connect(autosave)
-    autosave_timer.start()
-    window._autosave_timer = autosave_timer  # keep a reference alive
+    if report.migrated_from is not None:
+        notify("Your data was upgraded to the new format - a backup was kept")
+    elif imported is not None:
+        notify("Your data was moved to its new home in AppData")
 
-    # Persist on quit
+    def shutdown() -> None:
+        saver.stop()
+        try:
+            storage.close(snapshot)
+        except Exception:
+            log.exception("Final save failed - your data is as of the last successful save")
+        db.close()
+        lock.unlock()
+        log.info("Shutdown complete.")
+
     app.aboutToQuit.connect(shutdown)
+    app.commitDataRequest.connect(lambda _manager: saver.save_now())
     return app.exec()
 
 
