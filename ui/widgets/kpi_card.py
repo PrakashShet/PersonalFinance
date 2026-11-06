@@ -22,8 +22,12 @@ class KpiCard(QFrame):
         head = QHBoxLayout()
         head.setSpacing(6)
         self._icon_name = icon_name
-        self._icon = QLabel()
-        self._icon.setVisible(bool(icon_name))
+        # Never show() / setVisible(True) a widget that has no parent yet: on Windows
+        # it opens as its own window for a moment - a flicker at start-up. Hide
+        # when needed; a child shows with its parent anyway.
+        self._icon = QLabel(self)
+        if not icon_name:
+            self._icon.hide()
         head.addWidget(self._icon)
         self.title_label = QLabel(title)
         self.title_label.setObjectName("kpiLabel")

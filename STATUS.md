@@ -16,7 +16,7 @@ place; don't add another planning document. Superseded plans live in `docs/archi
 
 Verified this pass, by running things - not asserted:
 
-- **Test suite executed on Windows: 167 passed** (`run_tests.bat`, about 30 s). Besides the
+- **Test suite executed on Windows: 169 passed** (`run_tests.bat`, about 30 s). Besides the
   unit tests it now runs four end-to-end suites through the real window and dialogs
   (every dialog's own Save button and validation run; a dialog left open fails):
   - `test_e2e_user_session` - one session across every page: accounts, transactions
@@ -65,7 +65,7 @@ launched off-screen only), and macOS / Linux.
 | Shortcuts | Ten pages: Ctrl+1 … Ctrl+9 and Ctrl+0 (an eleventh page would get none; a test guards it) |
 | Docs | User guide with screenshots of a fictional household; skills for budgets, the user guide and releasing; MIT license; changelog |
 | Publishing | Privacy scan tool; demo-data generator; `.gitattributes`; personal figures removed from docs and tests |
-| End-to-end testing | Found and fixed: SIP / mutual fund form crashed the app; unexpected errors closed the app silently (now reported); a long ledger froze the app for minutes on a theme change; categories lost for good if the app closed within a second of its first start; Edit + Save erased creation dates and invented dates / zeroed a card's principal; three forms ignored Save silently; rebuilding the `.exe` deleted beside-the-exe data; "Rs" and Western grouping in two forms; batch files named a missing script; the lock file was visible to git |
+| End-to-end testing | Found and fixed: flicker at every start (51 widgets briefly opened as windows of their own; the window stayed blank until a save finished) and when a details panel was rebuilt twice in a row; SIP / mutual fund form crashed the app; unexpected errors closed the app silently (now reported); a long ledger froze the app for minutes on a theme change; categories lost for good if the app closed within a second of its first start; Edit + Save erased creation dates and invented dates / zeroed a card's principal; three forms ignored Save silently; rebuilding the `.exe` deleted beside-the-exe data; "Rs" and Western grouping in two forms; batch files named a missing script; the lock file was visible to git |
 
 The two live-data steps from 1.0 (removing the test accounts, upgrading the store to
 format v2) were completed on 2026-11-06.

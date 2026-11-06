@@ -123,6 +123,17 @@ button. Small single-purpose prompts belong in `ui/dialogs/quick_dialogs.py`.
 - Money inputs use the `₹ ` prefix; previews and labels use `fmt_inr`, never
   `f"{x:,}"` (Western grouping).
 
+## No flicker
+
+- Never `show()` / `setVisible(True)` a widget that has no parent yet - on Windows it
+  opens as its own window for a moment. Create children with a parent, or only ever
+  `hide()` them during construction; a child shows with its parent anyway.
+- Remove widgets with `discard(w)` or `clear_layout(layout)` from `ui/widgets/common.py`.
+  They hide before detaching: a widget added to a visible container has a "show" queued
+  for the next event pass, and if it is detached first it pops up as a window.
+- `test_no_widget_flashes_up_as_a_window_of_its_own` visits every page, selects every item
+  and opens every form, and fails on any stray window.
+
 ## Big tables
 
 Filling a `QTableWidget` row by row while its columns *resize to contents* re-fits the

@@ -151,3 +151,13 @@ def test_an_unexpected_error_is_reported_not_a_crash(tmp_path):
     assert any(m[0] == "critical" and "division by zero" in m[2] for m in r["messages"]), r
     log = (home / "logs" / "app.log")
     assert "ZeroDivisionError" in log.read_text(encoding="utf-8")
+
+
+def test_start_up_opens_one_window_and_paints_it_before_saving(tmp_path):
+    """No flicker: no widget may flash up as a window of its own (start-up used to
+    show 51), and the window paints before anything saves (a save straight after
+    show() left it blank first)."""
+    r = _run(tmp_path / "home", E2E_SPY="1")
+    assert r["exit"] == 0, r["log"][-2000:]
+    assert r["windows"] == ["MainWindow"], r["windows"]
+    assert r["saves_before_paint"] == 0

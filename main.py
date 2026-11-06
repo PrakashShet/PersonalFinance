@@ -21,7 +21,7 @@ import traceback
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QLockFile, QUrl
+from PyQt6.QtCore import QLockFile, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
@@ -186,7 +186,9 @@ def main() -> int:
     saver.status.connect(window.set_save_status)
     ctx.events.changed.connect(saver.request)
     window.show()
-    saver.save_now()
+    # Save once the window has painted: a save straight after show() kept the
+    # new window blank until it finished - a flash at every start.
+    QTimer.singleShot(500, saver.save_now)
 
     # Data from an old build beside the .exe is always in the old format too,
     # so both can happen at once - say both.

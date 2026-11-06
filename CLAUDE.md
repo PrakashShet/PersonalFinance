@@ -141,6 +141,13 @@ Fusion style + palette + rendered stylesheet; follows Windows or a saved choice.
   is listed in the tone block of `theme.qss`. A new toned role goes there too.
 - Icons: `ui/theme/icons.py` (inline SVG, tinted per theme). No image files.
 
+**No flicker.** Never `show()` / `setVisible(True)` a widget before it has a parent:
+on Windows it opens as a window of its own for a moment. Hide when needed (a child shows
+with its parent). Remove widgets with `discard()` / `clear_layout()` (`ui/widgets/common.py`),
+which hide before detaching: a widget added to a visible container has a show queued, and
+if it is detached first it pops up as a window. `test_no_widget_flashes_up_as_a_window_of_its_own`
+and `test_start_up_opens_one_window_and_paints_it_before_saving` guard both.
+
 **Building blocks** (`ui/widgets/`): `Card`, `PageHeader`, `KpiCard`, `Badge`, `Banner`,
 `EmptyState`, `SegmentedControl`, `StatGrid`, `ActivityRow`, `ElidedLabel`, `ListTile`,
 `DetailPanel`, `TrendChart`, `SegmentedBar`, `Toast`. Single-line text that can be long
@@ -209,7 +216,7 @@ without `on_change` leaves pages stale *and* skips the save-after-change.
 ```bat
 run_setup.bat            :: create .venv, install requirements
 run.bat                  :: launch the app
-run_tests.bat            :: full pytest suite (167 tests, ~30 s; includes the end-to-end suites)
+run_tests.bat            :: full pytest suite (169 tests, ~30 s; includes the end-to-end suites)
 run_tests.bat -m smoke   :: E2E + UI smoke only
 run_build_exe.bat        :: PyInstaller build via personal_finance.spec
 ```

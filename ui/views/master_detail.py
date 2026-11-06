@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
 )
 
 from services.app_context import AppContext
-from ui.widgets.common import EmptyState, PageHeader, button
+from ui.widgets.common import EmptyState, PageHeader, button, discard
 from ui.widgets.detail_panel import DetailPanel
 from ui.widgets.kpi_card import KpiCard
 from ui.widgets.list_tile import ListTile
@@ -214,8 +214,7 @@ class MasterDetailView(QWidget):
 
     def _rebuild_tiles(self, visible: list) -> None:
         for t in self._tiles:
-            t.setParent(None)
-            t.deleteLater()
+            discard(t)
         self._tiles = []
         while self.tile_layout.count():
             self.tile_layout.takeAt(0)

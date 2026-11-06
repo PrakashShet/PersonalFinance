@@ -125,7 +125,7 @@ ui  ──►  services  ──►  repositories  ──►  db (SQLite, in memo
   template. No view has a hard-coded colour.
 
 ```bat
-run_tests.bat                                :: 167 tests, including end-to-end runs of the real window
+run_tests.bat                                :: 169 tests, including end-to-end runs of the real window
 .venv\Scripts\python tools\render_pages.py   :: every page, both themes, on a temporary COPY of your data
 .venv\Scripts\python tools\make_user_guide.py :: regenerate the guide's screenshots from demo data
 .venv\Scripts\python tools\privacy_scan.py   :: before pushing: is any of your data in the repo?

@@ -251,3 +251,49 @@ def test_a_long_ledger_stays_responsive_through_a_theme_change(qtbot, tmp_path, 
         app.setStyleSheet("")
         theme.mode = "system"
         database.close()
+
+
+def test_no_widget_flashes_up_as_a_window_of_its_own(qtbot, monkeypatch, tmp_path, isolated_app_db):
+    """A widget made visible before it has a parent opens as its own window for a
+    moment - on Windows a visible flicker. Start-up used to show 51 of them."""
+    from PyQt6.QtCore import QEvent, QObject
+    from PyQt6.QtWidgets import QDialog, QMainWindow, QWidget
+
+    from ui.main_window import MainWindow
+
+    sys.path.insert(0, str(PROJECT_ROOT / "tools"))
+    from make_demo_store import build
+
+    shown: list = []
+
+    class Spy(QObject):
+        def eventFilter(self, obj, event):  # noqa: N802
+            if event.type() == QEvent.Type.Show and isinstance(obj, QWidget) and obj.isWindow():
+                shown.append(obj)
+            return False
+
+    app = QApplication.instance()
+    spy = Spy()
+    app.installEventFilter(spy)
+    database, _prefs, _storage, ctx = _open(tmp_path / "data")
+    try:
+        build(ctx)
+        window = MainWindow(ctx)
+        qtbot.addWidget(window)
+        window.show()
+        for i in range(window.sidebar.count()):                 # every page ...
+            window.sidebar.setCurrentRow(i)
+            page = window.stack.currentWidget()
+            if hasattr(page, "select"):                          # ... every detail panel
+                for tile in list(page._tiles):
+                    page.select(tile.key)
+            app.processEvents()
+        robot = Robot(monkeypatch, app)
+        for act, _icon in window._menu_actions:                 # ... every form
+            robot.then(cancel)
+            act.trigger()
+        stray = [type(w).__name__ for w in shown if not isinstance(w, (QDialog, QMainWindow))]
+        assert stray == [], stray
+    finally:
+        app.removeEventFilter(spy)
+        database.close()

@@ -48,7 +48,7 @@ need:
 ## Tier 3 - the test suite (Windows `.venv`)
 
 ```bat
-run_tests.bat              :: everything - 167 tests, about 30 s, as of 1.1.0
+run_tests.bat              :: everything - 169 tests, about 30 s, as of 1.1.0
 run_tests.bat -m smoke     :: E2E + UI only
 ```
 

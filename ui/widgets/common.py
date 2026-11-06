@@ -45,13 +45,24 @@ def set_tone(widget: QWidget, tone: Optional[str]) -> None:
     repolish(widget)
 
 
+def discard(widget: QWidget) -> None:
+    """Remove a widget from the screen for good.
+
+    Hide it first: a widget added to a visible container has a "show" queued
+    for the next event pass. Detached before that runs (a panel rebuilt twice in
+    a row), it would open as a window of its own for a moment - a flicker.
+    """
+    widget.hide()
+    widget.setParent(None)
+    widget.deleteLater()
+
+
 def clear_layout(layout: QLayout) -> None:
     while layout.count():
         item = layout.takeAt(0)
         w = item.widget()
         if w is not None:
-            w.setParent(None)
-            w.deleteLater()
+            discard(w)
         elif item.layout() is not None:
             clear_layout(item.layout())
 
@@ -221,8 +232,12 @@ class PageHeader(QWidget):
         col.setSpacing(3)
         self.title = label(title, "pageTitle")
         col.addWidget(self.title)
+        # Never show() / setVisible(True) a widget that has no parent yet: on Windows
+        # it opens as its own window for a moment - a flicker at start-up. Hide
+        # when needed; a child shows with its parent anyway.
         self.subtitle = label(subtitle, "pageSubtitle", wrap=True)
-        self.subtitle.setVisible(bool(subtitle))
+        if not subtitle:
+            self.subtitle.hide()
         col.addWidget(self.subtitle)
         row.addLayout(col, 1)
         self.actions = QHBoxLayout()
@@ -293,7 +308,8 @@ class EmptyState(QWidget):
         col.addWidget(self.title)
         self.text = label(text, "emptyText", wrap=True)
         self.text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.text.setVisible(bool(text))
+        if not text:                                 # hide, never show, before it has a parent
+            self.text.hide()
         col.addWidget(self.text)
         if action_text and on_action is not None:
             row = QHBoxLayout()

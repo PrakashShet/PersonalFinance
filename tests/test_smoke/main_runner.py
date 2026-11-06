@@ -8,6 +8,7 @@ after ``E2E_QUIT_MS``, and the outcome is written as JSON to ``E2E_OUT``.
     E2E_ACTION=add_account   add an account through the service once the window is up
     E2E_ACTION=raise         raise an error inside a handler once the window is up
     E2E_LEGACY=<folder>      pretend this is the old beside-the-exe data folder
+    E2E_SPY=1                record top-level windows and saves before the first paint
 """
 from __future__ import annotations
 
@@ -83,6 +84,43 @@ if os.environ.get("E2E_ACTION") == "raise":
         return ctx
 
     app_main.AppContext.create = staticmethod(_create_r)
+
+if os.environ.get("E2E_SPY"):
+    # Which top-level windows appear, and whether anything saves between the main
+    # window being shown and its first paint (a blank-window flash).
+    from PyQt6.QtCore import QEvent, QObject
+    from PyQt6.QtWidgets import QWidget
+
+    record["windows"], record["saves_before_paint"] = [], 0
+    _state = {"shown": False, "painted": False}
+
+    class _Spy(QObject):
+        def eventFilter(self, obj, event):  # noqa: N802
+            kind = event.type()
+            if kind == QEvent.Type.Show and isinstance(obj, QWidget) and obj.isWindow():
+                record["windows"].append(type(obj).__name__)
+                _state["shown"] = _state["shown"] or type(obj).__name__ == "MainWindow"
+            elif (kind == QEvent.Type.Paint and _state["shown"] and isinstance(obj, QWidget)
+                  and type(obj.window()).__name__ == "MainWindow"):
+                _state["painted"] = True
+            return False
+
+    _spy = _Spy()
+    _real_install = app_main.install_error_handler
+
+    def _install_and_spy():
+        _real_install()
+        QApplication.instance().installEventFilter(_spy)
+
+    app_main.install_error_handler = _install_and_spy
+    _real_save = app_main.Storage.save
+
+    def _save(self, *args, **kwargs):
+        if _state["shown"] and not _state["painted"]:
+            record["saves_before_paint"] += 1
+        return _real_save(self, *args, **kwargs)
+
+    app_main.Storage.save = _save
 
 try:
     record["exit"] = app_main.main()

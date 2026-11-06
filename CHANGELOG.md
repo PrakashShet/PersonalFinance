@@ -29,6 +29,12 @@ automatically, after a backup, the first time a new version opens it.
 
 ### Fixed (found by end-to-end testing)
 
+- **Flicker at start-up and while browsing.** Every start briefly flashed 51
+  small windows: page subtitles, card icons and empty-page text appeared as
+  separate windows before taking their place. Rebuilding a details panel twice in
+  a row flashed more, for example after **View** on a budget alert. The window
+  also stayed blank until the first save finished. Now only the main window
+  appears, and it paints straight away.
 - **Adding or editing a SIP or mutual fund crashed the app.** The form sent the
   units twice.
 - **An unexpected error closed the app without a word.** It now explains what

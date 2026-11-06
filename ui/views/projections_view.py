@@ -31,7 +31,16 @@ from PyQt6.QtWidgets import (
 from services.app_context import AppContext
 from services.projection_service import Assumptions, Stress
 from ui.theme import theme
-from ui.widgets.common import Banner, Card, EmptyState, PageHeader, StatGrid, clear_layout, label
+from ui.widgets.common import (
+    Banner,
+    Card,
+    EmptyState,
+    PageHeader,
+    StatGrid,
+    clear_layout,
+    discard,
+    label,
+)
 from ui.widgets.list_tile import ListTile
 from utils.formatters import fmt_date, fmt_inr
 from utils.logger import get_logger
@@ -283,8 +292,7 @@ class ProjectionsView(QWidget):
     # ---------------------------------------------------------------- tiles
     def _refresh_tiles(self) -> None:
         for t in self._tiles:
-            t.setParent(None)
-            t.deleteLater()
+            discard(t)
         self._tiles = []
         while self.tile_layout.count():
             self.tile_layout.takeAt(0)
