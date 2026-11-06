@@ -1,0 +1,18 @@
+{
+  "inflation": {
+    "general": 0.06,
+    "education": 0.10,
+    "healthcare": 0.08
+  },
+  "expected_returns": {
+    "equity_large_cap": 0.11,
+    "equity_mid_cap": 0.13,
+    "equity_small_cap": 0.15,
+    "debt_fd": 0.07,
+    "debt_ppf": 0.071,
+    "debt_epf": 0.082,
+    "gold": 0.085,
+    "real_estate": 0.07
+  },
+  "note": "Conservative long-term assumptions. Adjust for your own risk profile."
+}

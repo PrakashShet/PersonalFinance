@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Runtime
+logs/*.log
+data/app.db
+data/app.db-*
+data/cache/*
+!data/cache/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PyInstaller
+build/
+dist/
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Personal financial data never goes into the code repo — it has its own
+# backup system (data/user/backups). Pushing this repo must never leak finances.
+data/store/
+data/user/
+logs/

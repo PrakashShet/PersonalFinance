@@ -1,0 +1,301 @@
+/* Personal Finance Manager - Theme
+   Tile-based dark theme: black background, light-brown translucent tiles,
+   warm off-white ("dark white") typography. */
+
+/* ---- Base ------------------------------------------------------------- */
+QMainWindow, QWidget {
+    background-color: #0a0a0a;
+    color: #e7e0d4;
+    font-family: "Segoe UI", "Inter", "SF Pro Text", sans-serif;
+    font-size: 14px;
+}
+
+QDialog {
+    background-color: #0a0a0a;
+}
+
+/* ---- Sidebar ---------------------------------------------------------- */
+QListWidget#sidebar {
+    background-color: #050505;
+    border: none;
+    border-right: 1px solid rgba(201, 170, 122, 0.18);
+    padding: 16px 10px;
+    outline: 0;
+}
+
+QListWidget#sidebar::item {
+    padding: 12px 18px;
+    margin: 4px 6px;
+    border-radius: 10px;
+    color: #cbb896;
+}
+
+QListWidget#sidebar::item:hover {
+    background-color: rgba(201, 170, 122, 0.12);
+}
+
+QListWidget#sidebar::item:selected {
+    background-color: rgba(201, 170, 122, 0.22);
+    color: #f3ecdf;
+}
+
+/* ---- Headings --------------------------------------------------------- */
+QLabel#pageTitle {
+    font-size: 24px;
+    font-weight: 700;
+    color: #f3ecdf;
+    padding: 8px 0 16px 0;
+}
+
+QLabel#sectionLabel {
+    font-size: 14px;
+    font-weight: 600;
+    color: #c4a878;
+    padding: 12px 0 4px 0;
+}
+
+/* ---- KPI tiles -------------------------------------------------------- */
+QFrame#kpiCard {
+    background-color: rgba(201, 170, 122, 0.10);
+    border: 1px solid rgba(201, 170, 122, 0.30);
+    border-radius: 14px;
+    padding: 18px;
+    margin: 6px;
+    min-height: 72px;
+}
+
+QLabel#kpiTitle {
+    color: #c4a878;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    background-color: transparent;
+}
+
+QLabel#kpiValue {
+    color: #f4eee2;
+    font-size: 22px;
+    font-weight: 700;
+    padding-top: 4px;
+    background-color: transparent;
+}
+
+/* ---- Buttons ---------------------------------------------------------- */
+QPushButton {
+    background-color: rgba(201, 170, 122, 0.16);
+    color: #ece5d7;
+    border: 1px solid rgba(201, 170, 122, 0.40);
+    border-radius: 8px;
+    padding: 8px 16px;
+}
+
+QPushButton:hover {
+    background-color: rgba(201, 170, 122, 0.28);
+    border-color: rgba(201, 170, 122, 0.60);
+}
+
+QPushButton:pressed {
+    background-color: rgba(201, 170, 122, 0.36);
+}
+
+QPushButton:disabled {
+    background-color: rgba(201, 170, 122, 0.06);
+    color: #6b6155;
+    border-color: rgba(201, 170, 122, 0.15);
+}
+
+/* ---- Inputs ----------------------------------------------------------- */
+QLineEdit, QComboBox, QDateEdit, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QTextEdit {
+    background-color: rgba(201, 170, 122, 0.08);
+    border: 1px solid rgba(201, 170, 122, 0.30);
+    border-radius: 8px;
+    padding: 6px 8px;
+    color: #f1ebe0;
+    selection-background-color: rgba(201, 170, 122, 0.45);
+    selection-color: #ffffff;
+}
+
+QLineEdit:focus, QComboBox:focus, QDateEdit:focus, QSpinBox:focus,
+QDoubleSpinBox:focus, QPlainTextEdit:focus, QTextEdit:focus {
+    border: 1px solid rgba(201, 170, 122, 0.65);
+}
+
+QComboBox QAbstractItemView {
+    background-color: #15110c;
+    border: 1px solid rgba(201, 170, 122, 0.35);
+    color: #ece5d7;
+    selection-background-color: rgba(201, 170, 122, 0.30);
+}
+
+/* ---- Checkboxes ------------------------------------------------------- */
+QCheckBox {
+    color: #e7e0d4;
+    spacing: 8px;
+    background-color: transparent;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid rgba(201, 170, 122, 0.45);
+    border-radius: 4px;
+    background-color: rgba(201, 170, 122, 0.08);
+}
+
+QCheckBox::indicator:checked {
+    background-color: rgba(201, 170, 122, 0.70);
+    border-color: rgba(201, 170, 122, 0.80);
+}
+
+/* ---- Tables ----------------------------------------------------------- */
+QTableView, QTableWidget {
+    background-color: rgba(201, 170, 122, 0.05);
+    alternate-background-color: rgba(201, 170, 122, 0.10);
+    gridline-color: rgba(201, 170, 122, 0.18);
+    border: 1px solid rgba(201, 170, 122, 0.25);
+    border-radius: 12px;
+    color: #e7e0d4;
+    selection-background-color: rgba(201, 170, 122, 0.32);
+    selection-color: #fbf6ec;
+}
+
+QTableView::item, QTableWidget::item {
+    padding: 4px 6px;
+}
+
+QHeaderView::section {
+    background-color: rgba(201, 170, 122, 0.18);
+    color: #f1ebe0;
+    padding: 8px;
+    border: none;
+    border-right: 1px solid rgba(201, 170, 122, 0.15);
+}
+
+QTableCornerButton::section {
+    background-color: rgba(201, 170, 122, 0.18);
+    border: none;
+}
+
+/* ---- Scrollbars ------------------------------------------------------- */
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical {
+    background: rgba(201, 170, 122, 0.35);
+    border-radius: 5px;
+    min-height: 30px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: rgba(201, 170, 122, 0.55);
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 2px;
+}
+
+QScrollBar::handle:horizontal {
+    background: rgba(201, 170, 122, 0.35);
+    border-radius: 5px;
+    min-width: 30px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: rgba(201, 170, 122, 0.55);
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+
+/* ---- Misc ------------------------------------------------------------- */
+QLabel {
+    background-color: transparent;
+}
+
+QToolTip {
+    background-color: #15110c;
+    color: #ece5d7;
+    border: 1px solid rgba(201, 170, 122, 0.40);
+    padding: 4px 6px;
+}
+
+/* ---- Account tiles ---------------------------------------------------- */
+QFrame#accountTile {
+    background-color: rgba(201, 170, 122, 0.10);
+    border: 1px solid rgba(201, 170, 122, 0.30);
+    border-radius: 14px;
+}
+
+QFrame#accountTile:hover {
+    background-color: rgba(201, 170, 122, 0.17);
+    border-color: rgba(201, 170, 122, 0.55);
+}
+
+QFrame#accountTile[archived="true"] {
+    background-color: rgba(201, 170, 122, 0.05);
+    border-color: rgba(201, 170, 122, 0.18);
+}
+
+QLabel#tileName {
+    font-size: 16px;
+    font-weight: 700;
+    color: #f4eee2;
+    background-color: transparent;
+}
+
+QLabel#tileMeta {
+    color: #c4a878;
+    font-size: 12px;
+    background-color: transparent;
+}
+
+QLabel#tileFlags {
+    color: #9c8869;
+    font-size: 11px;
+    background-color: transparent;
+}
+
+QLabel#tileBalance {
+    font-size: 21px;
+    font-weight: 700;
+    color: #f4eee2;
+    background-color: transparent;
+}
+
+QLabel#tileBadge {
+    font-size: 11px;
+    font-weight: 600;
+    color: #d2b98f;
+    background-color: transparent;
+}
+
+QLabel#tileBadge[archived="true"] {
+    color: #8a8076;
+}
+
+QPushButton#tileBtn {
+    padding: 5px 12px;
+    font-size: 12px;
+    border-radius: 7px;
+}
+
+/* ---- Detail sections (account details dialog) ------------------------- */
+QFrame#detailSection {
+    background-color: rgba(201, 170, 122, 0.07);
+    border: 1px solid rgba(201, 170, 122, 0.22);
+    border-radius: 12px;
+}
+
+QLabel#detailValue {
+    color: #ece5d7;
+    background-color: transparent;
+}
